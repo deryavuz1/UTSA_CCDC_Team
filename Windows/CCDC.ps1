@@ -1,0 +1,277 @@
+Function Get-LocalGroupMembers {
+    param (
+        [string]$GroupName
+    )
+
+    $groupInfo = net localgroup "$GroupName" | Select-Object -Skip 6 | Where-Object {$_ -match '\S'}  
+
+    if ($groupInfo) {
+        Write-Host "`n$GroupName" -ForegroundColor Cyan
+        Write-Host "------------------------"
+
+        if ($groupInfo.Count - 1 -le 0) {
+            Write-Host "Group '$GroupName' not found or has no members." -ForegroundColor Red
+        }
+
+        for ($i = 0; $i -lt $groupInfo.Count - 1; $i++) {  # Iterate without last value
+            Write-Host "  - $($groupInfo[$i])"
+        }
+    } else {
+        Write-Host "Group '$GroupName' not found or has no members." -ForegroundColor Red
+    }
+}
+
+Function Get-RegistryKeys {
+    param (
+        [string]$RegKey
+    )
+    Write-Host "$RegKey" -ForegroundColor Cyan
+    $runKey = Get-Item -Path "$RegKey"
+    $runKey.GetValueNames() | ForEach-Object { [PSCustomObject]@{ Name = $_; Value = $runKey.GetValue($_) } } | Out-Host
+
+}
+
+function Enumerate {
+    param (
+        [System.Security.SecureString]$AdminPass
+    )
+    Write-Output "=========START SYSTEM INFO========="
+    $hostinfo = Get-ComputerInfo
+    Write-Host "[+] Retrieved host info!" -ForegroundColor Green
+    $netinfo = Get-NetIPConfiguration -Detailed
+    Write-Host "[+] Retrieved network configuration!" -ForegroundColor Green
+    
+    Write-Output "Hostname: $($hostinfo.CsDomain)\$($hostinfo.CsName)`n"
+    Write-Output "OS: $($hostinfo.WindowsProductName) - $($hostinfo.OSVersion) - $($hostinfo.OsBuildNumber)"
+    
+    foreach( $interface in $netinfo ) {
+        Write-Output "- $($interface.InterfaceAlias)"
+        Write-Output "    - IPv4: $($interface.IPv4Address.IPv4Address)"
+        Write-Output "    - IPv6: $($interface.IPv6Address.IPv6Address)"
+        Write-Output "    - Default gateway: $($interface.IPv4DefaultGateway.NextHop)"
+        Write-Output "    - DNS: $($interface.DNSServer.ServerAddresses)"
+    }
+    Write-Output ""
+    
+    Write-Output "Domain Joined: $($hostinfo.CsPartOfDomain)"
+    Write-Output "Domain Role: $($hostinfo.CsDomainRole)"
+
+    Write-Output "=========END SYSTEM INFO========="
+
+    Write-Output "=========START USER INFO========="
+    Get-LocalUser | Out-Host
+    
+    Write-Host "Local Groups:"
+    net localgroup
+
+    Get-LocalGroupMembers -GroupName "Administrators"
+    Get-LocalGroupMembers -GroupName "Remote Management Users"
+    Get-LocalGroupMembers -GroupName "Remote Desktop Users"
+    Get-LocalGroupMembers -GroupName "Backup Operators"
+    Get-LocalGroupMembers -GroupName "Network Configuration Operators"
+    Get-LocalGroupMembers -GroupName "Server Operators"
+    Get-LocalGroupMembers -GroupName "Account Operators"
+    
+    Write-Output ""
+    if ($AdminPass) {
+        Enable-LocalUser Administrator
+        Write-Host "[+] Enabled local administrator" -ForegroundColor Green
+        Set-LocalUser -Name Administrator -Password $AdminPass
+        Write-Host "[+] Changed Administrator password!" -ForegroundColor Green
+    } else {
+        Write-Host "[-] Nothing was given for new Administrator password - skipping" -ForegroundColor Yellow
+    }
+    Write-Output "=========END USER INFO========="
+
+    Write-Output "=========START LISTENING PORTS========="
+    $connections = @()
+    function Get-CommandLine {
+        param ($ProcID)
+        (Get-WmiObject Win32_Process -Filter "ProcessId = $ProcID" -ErrorAction SilentlyContinue).CommandLine
+    }
+
+    $tcpConnections = Get-NetTCPConnection -State Listen | ForEach-Object {
+        [PSCustomObject]@{
+            Protocol    = "TCP"
+            LocalIP     = $_.LocalAddress
+            LocalPort   = $_.LocalPort
+            ProcessID   = $_.OwningProcess
+            CommandLine = Get-CommandLine $_.OwningProcess
+        }
+    }
+
+    $udpConnections = Get-NetUDPEndpoint | ForEach-Object {
+        [PSCustomObject]@{
+            Protocol    = "UDP"
+            LocalIP     = $_.LocalAddress
+            LocalPort   = $_.LocalPort
+            ProcessID   = $_.OwningProcess
+            CommandLine = Get-CommandLine $_.OwningProcess
+        }
+    }
+
+    $allConnections = @($tcpConnections + $udpConnections)
+    $dnsEntries = $allConnections | Where-Object { $_.CommandLine -match "C:\\Windows\\System32\\dns.exe" }
+    $uniqueDnsEntries = @($dnsEntries | Select-Object -First 1 -Property Protocol, LocalIP, LocalPort, ProcessID, CommandLine)
+    $otherEntries = @($allConnections | Where-Object { $_.CommandLine -notmatch "C:\\Windows\\System32\\dns.exe" })
+    $finalConnections = @($uniqueDnsEntries + $otherEntries)
+    $finalConnections | Format-Table -AutoSize
+    Write-Output "=========END LISTENING PORTS========="
+
+    Write-Output "=========START PROCESSES========="
+    # Get session info from `query session`
+    $sessions = @(query session | ForEach-Object {
+        if ($_ -match "(\S+)\s+(\d+)\s") {
+            [PSCustomObject]@{
+                SessionName = $matches[1]
+                SessionId   = [int]$matches[2]
+            }
+        }
+    })
+
+    # Get process details
+    Get-CimInstance Win32_Process | ForEach-Object {
+        $proc = $_
+        $owner = $proc | Invoke-CimMethod -MethodName GetOwner
+        $commandLine = $proc.CommandLine
+        $sessionId = $proc.SessionId
+
+        # Match session ID to session name
+        $sessionName = ($sessions | Where-Object { $_.SessionId -eq $sessionId }).SessionName
+        if (-not $sessionName) { $sessionName = "Unknown" }
+
+        [PSCustomObject]@{
+            UserName    = "$($owner.Domain)\$($owner.User)"
+            ProcessID   = $proc.ProcessId
+            CommandLine = $commandLine
+            SessionName = $sessionName
+            SessionId   = $sessionId
+        }
+    } | Format-Table -AutoSize
+    Write-Output "==========END PROCESSES=========="
+
+    Write-Output "==========START SERVICES=========="
+    $svc = Get-WmiObject Win32_Service | Select-Object Name, PathName
+    Write-Output $svc
+    Write-Output "==========END SERVICES=========="
+
+    Write-Output "==========START Installed Applications=========="
+    $a1 = gci HKLM:\SOFTWARE
+    $a2 = gci "C:\Program Files" -Force
+    $a3 = gci "C:\Program Files (x86)" -Force
+    Write-Output "HKLM:\SOFTWARE`n--------------"
+    Write-Output $a1
+    Write-Output "`nC:\Program Files\`n-----------------"
+    Write-Output $a2
+    Write-Output "`nC:\Program Files (x86)\`n-----------------------"
+    Write-Output $a3
+    Write-Output "==========END Installed Applications=========="
+
+    Write-Output "==========START Scheduled Tasks=========="
+    $tasks = Get-ScheduledTask | ForEach-Object {
+        $taskName = $_.TaskName
+        $taskPath = $_.TaskPath
+        $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -TaskPath $taskPath
+        $execPath = ($_ | Select-Object -ExpandProperty Actions).Execute
+
+        [PSCustomObject]@{
+            TaskPath  = $taskPath
+            TaskName  = $taskName
+            ExecPath  = $execPath
+        }
+    }
+    $tasks | Format-Table -AutoSize
+    Write-Output "==========END Scheduled Tasks=========="
+
+    Write-Output "==========START Registry Keys=========="
+    Get-RegistryKeys -RegKey "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+    Get-RegistryKeys -RegKey "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"
+    Get-RegistryKeys -RegKey "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run"
+    Get-RegistryKeys -RegKey "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce"
+    Write-Output "==========END Registry Keys=========="
+
+    Clear-History
+    try {
+        rm $(Get-PSReadLineOption).HistorySavePath -ErrorAction Stop
+    } catch {
+        Write-Host "[-] No powershell history file found!" -ForegroundColor Yellow
+    }
+    Write-Host "[+] Cleared powershell history!" -ForegroundColor Green
+
+    Write-Host "[+] Remember to delete unnecessary local administrators!" -ForegroundColor Yellow
+    Write-Host "[+] Finished machine enumeration" -ForegroundColor Green
+}
+
+function Phase2 {
+    Write-Output "Starting Phase 2!"
+    Get-SmbShare | Get-SmbShareAccess | Sort-Object
+    Read-Host -Prompt "Press enter to remove and limit unnecessary shares!"
+    net share C$ /delete
+    net share ADMIN$ /delete
+    Read-Host -Prompt "Stop HERE! Change permissions on shares to readonly in the gui! If done, press enter!"
+    Read-Host -Prompt "Stopping services: WebClient, Spooler, WinRM"
+    Get-Service "WinRM" | Stop-Service
+    Get-Service "Spooler" | Stop-Service
+    Get-Service "WebClient" | Stop-Service
+    Read-Host -Prompt "Press enter to start Defender services"
+    Get-Service "WinDefend" | Start-Service # Microsoft Defender Antivirus Service - MsMpEng.exe
+    Get-Service "WdNisSvc" | Start-Service # Microsoft Defender Antivirus Network Inspection Service - NisSrv.exe
+    Get-Service "MDCoreSvc" | Start-Service # Microsoft Defender Core Service - MpDefenderCoreService.exe
+    Get-Service "SecurityHealthService" | Start-Service # Windows Security Service - SecurityHealthService.exe
+    #Get-Service "Sense" # Windows Defender Advanced Threat Protection Service - MsSense.exe
+    Write-Output "Current Exclusions: (Path = Folder & File, Extension = File type, Process = Process Binary"
+    Get-MpPreference | Select-Object -ExpandProperty ExclusionPath,ExclusionProcess,ExclusionExtension
+    $answer = Read-Host -Prompt "Do you want to remove exclusions? yes/no"
+    if ($answer -eq "yes")
+    {
+        foreach ($i in (Get-MpPreference).ExclusionPath) {
+            Remove-MpPreference -ExclusionPath $i
+            Write-Host($i)
+        }
+        foreach ($i in (Get-MpPreference).ExclusionProcess) {
+            Remove-MpPreference -ExclusionProcess $i
+            Write-Host($i)
+        }
+        foreach ($i in (Get-MpPreference).ExclusionExtension) {
+            Remove-MpPreference -ExclusionExtension $i
+            Write-Host($i)
+        }
+    }
+    
+    Read-Host -Prompt "Press enter to harden Defender (SampleSubmission, Enable protections, run Defender protection threats update)"
+    Set-MpPreference -SubmitSamplesConsent SendAllSamples
+    Set-MpPreference -MAPSReporting Advanced
+    Set-MpPreference -DisableIOAVProtection 0
+    Set-MpPreference -DisableRealtimeMonitoring 0
+    Set-MpPreference -DisableBehaviorMonitoring 0
+    Set-MpPreference -DisableScriptScanning 0
+    Set-MpPreference -DisableArchiveScanning 0
+    Set-MpPreference -EnableControlledFolderAccess Enabled
+
+    Read-Host -Prompt "Press enter to add ASR rules"
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 56a863a9-875e-4185-98a7-b882c64b5ce5 -AttackSurfaceReductionRules_Actions Enabled  # Vulnerable drivers
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 7674ba52-37eb-4a4f-a9a1-f0f9a1619a2c -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids D4F940AB-401B-4EfC-AADCAD5F3C50688A -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2 -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids BE9BA2D9-53EA-4CDC-84E5-9B1EEEE46550 -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 01443614-CD74-433A-B99E2ECDC07BFC25 -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 5BEB7EFE-FD9A-4556801D275E5FFC04CC -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids D3E037E1-3EB8-44C8-A917-57927947596D -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 3B576869-A4EC-4529-8536-B80A7769E899 -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 75668C1F-73B5-4CF0-BB93-3ECF5CB7CC84 -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 26190899-1602-49e8-8b27-eb1d0a1ce869 -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids e6db77e5-3df2-4cf1-b95a-636979351e5b -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids D1E49AAC-8F56-4280-B9BA993A6D77406C -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 33ddedf1-c6e0-47cb-833e-de6133960387 -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids B2B3F03D-6A65-4F7B-A9C7-1C7EF74A9BA4 -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids c0033c00-d16d-4114-a5a0-dc9b3a7d2ceb -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids a8f5898e-1dc8-49a9-9878-85004b8a61e6 -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 92E97FA1-2EDF-4476-BDD6-9DD0B4DDDC7B -AttackSurfaceReductionRules_Actions Enabled
+    Add-MpPreference -AttackSurfaceReductionRules_Ids C1DB55AB-C21A-4637-BB3FA12568109D35 -AttackSurfaceReductionRules_Actions Enabled
+    Restart-Service WinDefend
+    Update-MpSignature -AsJob
+
+    Read-Host -Prompt "Press enter to enable LSA protections"
+    New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPL" -Value 1
+    New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPLBoot" -Value 1
+}
