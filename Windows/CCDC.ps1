@@ -84,38 +84,16 @@ function Enumerate {
     Write-Output "=========END USER INFO========="
     
     Write-Output "=========START LISTENING PORTS========="
-    $connections = @()
-    function Get-CommandLine {
-        param ($ProcID)
-        (Get-WmiObject Win32_Process -Filter "ProcessId = $ProcID" -ErrorAction SilentlyContinue).CommandLine
-    }
-
-    $tcpConnections = Get-NetTCPConnection -State Listen | ForEach-Object {
-        [PSCustomObject]@{
-            Protocol    = "TCP"
-            LocalIP     = $_.LocalAddress
-            LocalPort   = $_.LocalPort
-            ProcessID   = $_.OwningProcess
-            CommandLine = Get-CommandLine $_.OwningProcess
-        }
-    }
-
-    $udpConnections = Get-NetUDPEndpoint | ForEach-Object {
-        [PSCustomObject]@{
-            Protocol    = "UDP"
-            LocalIP     = $_.LocalAddress
-            LocalPort   = $_.LocalPort
-            ProcessID   = $_.OwningProcess
-            CommandLine = Get-CommandLine $_.OwningProcess
-        }
-    }
-
-    $allConnections = @($tcpConnections + $udpConnections)
-    $dnsEntries = $allConnections | Where-Object { $_.CommandLine -match "C:\\Windows\\System32\\dns.exe" }
-    $uniqueDnsEntries = @($dnsEntries | Select-Object -First 1 -Property Protocol, LocalIP, LocalPort, ProcessID, CommandLine)
-    $otherEntries = @($allConnections | Where-Object { $_.CommandLine -notmatch "C:\\Windows\\System32\\dns.exe" })
-    $finalConnections = @($uniqueDnsEntries + $otherEntries)
-    $finalConnections | Format-Table -AutoSize
+    $procs = Get-Process
+    $ports = netstat -ano
+    $ports[4..$ports.length] |
+        ConvertFrom-String -PropertyNames ProcessName,Proto,Local,Remote,State,PID  | 
+        where  State -eq 'LISTENING' | 
+        foreach {
+            $_.ProcessName = ($procs | where ID -eq $_.PID).ProcessName
+            $_
+        } | 
+        Format-Table
     Write-Output "=========END LISTENING PORTS========="
     
     Write-Output "=========START PROCESSES========="
