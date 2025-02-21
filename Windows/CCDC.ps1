@@ -82,7 +82,7 @@ function Enumerate {
         Write-Host "[-] Nothing was given for new Administrator password - skipping" -ForegroundColor Yellow
     }
     Write-Output "=========END USER INFO========="
-
+    
     Write-Output "=========START LISTENING PORTS========="
     $connections = @()
     function Get-CommandLine {
@@ -117,7 +117,7 @@ function Enumerate {
     $finalConnections = @($uniqueDnsEntries + $otherEntries)
     $finalConnections | Format-Table -AutoSize
     Write-Output "=========END LISTENING PORTS========="
-
+    
     Write-Output "=========START PROCESSES========="
     # Get session info from `query session`
     $sessions = @(query session | ForEach-Object {
@@ -190,6 +190,10 @@ function Enumerate {
     Get-RegistryKeys -RegKey "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce"
     Write-Output "==========END Registry Keys=========="
 
+    Write-Output "==========START Startup Folder==========" 
+    gci "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup" -Force | Out-Host
+    Write-Output "==========END Startup Folder=========="
+    Write-Output "`n"
     Clear-History
     try {
         rm $(Get-PSReadLineOption).HistorySavePath -ErrorAction Stop
@@ -202,23 +206,25 @@ function Enumerate {
     Write-Host "[+] Finished machine enumeration" -ForegroundColor Green
 }
 
+
+
 function Phase2 {
     Write-Output "Starting Phase 2!"
-    Get-SmbShare | Get-SmbShareAccess | Sort-Object
+    Get-SmbShare | Get-SmbShareAccess | Sort-Object | Out-Host
     Read-Host -Prompt "Press enter to remove and limit unnecessary shares!"
     net share C$ /delete
     net share ADMIN$ /delete
     Read-Host -Prompt "Stop HERE! Change permissions on shares to readonly in the gui! If done, press enter!"
     Read-Host -Prompt "Stopping services: WebClient, Spooler, WinRM"
-    Get-Service "WinRM" | Stop-Service
+    Get-Service "WebClient" | Stop-Service # MAY NOT BE PRESENT ON SOME MACHINES
     Get-Service "Spooler" | Stop-Service
-    Get-Service "WebClient" | Stop-Service
-    Read-Host -Prompt "Press enter to start Defender services"
+    Get-Service "WinRM" | Stop-Service
+    Read-Host -Prompt "Press enter to start Defender services" # ALSO NOT WKRING
     Get-Service "WinDefend" | Start-Service # Microsoft Defender Antivirus Service - MsMpEng.exe
     Get-Service "WdNisSvc" | Start-Service # Microsoft Defender Antivirus Network Inspection Service - NisSrv.exe
-    Get-Service "MDCoreSvc" | Start-Service # Microsoft Defender Core Service - MpDefenderCoreService.exe
+    Get-Service "MdCoreSvc" | Start-Service # Microsoft Defender Core Service - MpDefenderCoreService.exe # MAY NOT BE PRESENT
     Get-Service "SecurityHealthService" | Start-Service # Windows Security Service - SecurityHealthService.exe
-    #Get-Service "Sense" # Windows Defender Advanced Threat Protection Service - MsSense.exe
+    Get-Service "Sense" | Start-Service # Windows Defender Advanced Threat Protection Service - MsSense.exe # WILL NOT WORK IF YOU DO NOT HAVE MDE INSTALLED
     Write-Output "Current Exclusions: (Path = Folder & File, Extension = File type, Process = Process Binary"
     Get-MpPreference | Select-Object -ExpandProperty ExclusionPath,ExclusionProcess,ExclusionExtension
     $answer = Read-Host -Prompt "Do you want to remove exclusions? yes/no"
@@ -248,27 +254,27 @@ function Phase2 {
     Set-MpPreference -DisableArchiveScanning 0
     Set-MpPreference -EnableControlledFolderAccess Enabled
 
-    Read-Host -Prompt "Press enter to add ASR rules"
-    Add-MpPreference -AttackSurfaceReductionRules_Ids 56a863a9-875e-4185-98a7-b882c64b5ce5 -AttackSurfaceReductionRules_Actions Enabled  # Vulnerable drivers
-    Add-MpPreference -AttackSurfaceReductionRules_Ids 7674ba52-37eb-4a4f-a9a1-f0f9a1619a2c -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids D4F940AB-401B-4EfC-AADCAD5F3C50688A -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids 9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2 -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids BE9BA2D9-53EA-4CDC-84E5-9B1EEEE46550 -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids 01443614-CD74-433A-B99E2ECDC07BFC25 -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids 5BEB7EFE-FD9A-4556801D275E5FFC04CC -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids D3E037E1-3EB8-44C8-A917-57927947596D -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids 3B576869-A4EC-4529-8536-B80A7769E899 -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids 75668C1F-73B5-4CF0-BB93-3ECF5CB7CC84 -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids 26190899-1602-49e8-8b27-eb1d0a1ce869 -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids e6db77e5-3df2-4cf1-b95a-636979351e5b -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids D1E49AAC-8F56-4280-B9BA993A6D77406C -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids 33ddedf1-c6e0-47cb-833e-de6133960387 -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids B2B3F03D-6A65-4F7B-A9C7-1C7EF74A9BA4 -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids c0033c00-d16d-4114-a5a0-dc9b3a7d2ceb -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids a8f5898e-1dc8-49a9-9878-85004b8a61e6 -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids 92E97FA1-2EDF-4476-BDD6-9DD0B4DDDC7B -AttackSurfaceReductionRules_Actions Enabled
-    Add-MpPreference -AttackSurfaceReductionRules_Ids C1DB55AB-C21A-4637-BB3FA12568109D35 -AttackSurfaceReductionRules_Actions Enabled
-    Restart-Service WinDefend
+    Read-Host -Prompt "Press enter to add ASR rules & restart Defender"
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 56a863a9-875e-4185-98a7-b882c64b5ce5 -AttackSurfaceReductionRules_Actions Enabled # Block abuse of exploited vulnerable signed drivers
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 7674ba52-37eb-4a4f-a9a1-f0f9a1619a2c -AttackSurfaceReductionRules_Actions Enabled # Block Adobe Reader from creating child processes
+    Add-MpPreference -AttackSurfaceReductionRules_Ids D4F940AB-401B-4EfC-AADCAD5F3C50688A -AttackSurfaceReductionRules_Actions Enabled # Block all Office applications from creating child processes
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2 -AttackSurfaceReductionRules_Actions Enabled # Block credential stealing from the Windows local security authority subsystem (lsass.exe)
+    Add-MpPreference -AttackSurfaceReductionRules_Ids BE9BA2D9-53EA-4CDC-84E5-9B1EEEE46550 -AttackSurfaceReductionRules_Actions Enabled # Block executable content from email client and webmail
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 01443614-CD74-433A-B99E2ECDC07BFC25 -AttackSurfaceReductionRules_Actions Enabled # Block executable files from running unless they meet a prevalence, age, or trusted list criterion
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 5BEB7EFE-FD9A-4556801D275E5FFC04CC -AttackSurfaceReductionRules_Actions Enabled # Block execution of potentially obfuscated scripts
+    Add-MpPreference -AttackSurfaceReductionRules_Ids D3E037E1-3EB8-44C8-A917-57927947596D -AttackSurfaceReductionRules_Actions Enabled # Block JavaScript or VBScript from launching downloaded executable content
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 3B576869-A4EC-4529-8536-B80A7769E899 -AttackSurfaceReductionRules_Actions Enabled # Block Office applications from creating executable content
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 75668C1F-73B5-4CF0-BB93-3ECF5CB7CC84 -AttackSurfaceReductionRules_Actions Enabled # Block Office applications from injecting code into other processes
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 26190899-1602-49e8-8b27-eb1d0a1ce869 -AttackSurfaceReductionRules_Actions Enabled # Block Office communication application from creating child processes
+    Add-MpPreference -AttackSurfaceReductionRules_Ids e6db77e5-3df2-4cf1-b95a-636979351e5b -AttackSurfaceReductionRules_Actions Enabled # Block persistence through WMI event subscription, * File and folder exclusions not supported.
+    Add-MpPreference -AttackSurfaceReductionRules_Ids D1E49AAC-8F56-4280-B9BA993A6D77406C -AttackSurfaceReductionRules_Actions Enabled # Block process creations originating from PSExec and WMI commands
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 33ddedf1-c6e0-47cb-833e-de6133960387 -AttackSurfaceReductionRules_Actions Enabled # Block rebooting machine in Safe Mode (preview)
+    Add-MpPreference -AttackSurfaceReductionRules_Ids B2B3F03D-6A65-4F7B-A9C7-1C7EF74A9BA4 -AttackSurfaceReductionRules_Actions Enabled # Block untrusted and unsigned processes that run from USB
+    Add-MpPreference -AttackSurfaceReductionRules_Ids c0033c00-d16d-4114-a5a0-dc9b3a7d2ceb -AttackSurfaceReductionRules_Actions Enabled # Block use of copied or impersonated system tools (preview)
+    Add-MpPreference -AttackSurfaceReductionRules_Ids a8f5898e-1dc8-49a9-9878-85004b8a61e6 -AttackSurfaceReductionRules_Actions Enabled # Block Webshell creation for Servers
+    Add-MpPreference -AttackSurfaceReductionRules_Ids 92E97FA1-2EDF-4476-BDD6-9DD0B4DDDC7B -AttackSurfaceReductionRules_Actions Enabled # Block Win32 API calls from Office macros
+    Add-MpPreference -AttackSurfaceReductionRules_Ids C1DB55AB-C21A-4637-BB3FA12568109D35 -AttackSurfaceReductionRules_Actions Enabled # Use advanced protection against ransomware
+    #Restart-Service WinDefend # YOU CANNOT RESTART WINDEFEND. REBOOT HERE IS REQUIRED
     Update-MpSignature -AsJob
 
     Read-Host -Prompt "Press enter to enable LSA protections"
