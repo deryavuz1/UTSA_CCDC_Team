@@ -35,6 +35,9 @@ function Enumerate {
     param (
         [System.Security.SecureString]$AdminPass
     )
+    Write-Host "[+] Start Windows Updates and Defender Protection Updates!!" -ForegroundColor Blue
+    Write-Host "[+] Installing Firefox! Make sure to actually run the binary afterwards!" -ForegroundColor Yellow
+    iwr "https://download.mozilla.org/?product=firefox-stub&os=win&lang=en-US" -OutFile C:\FirefoxInstaller.exe
     Write-Output "=========START SYSTEM INFO========="
     $hostinfo = Get-ComputerInfo
     Write-Host "[+] Retrieved host info!" -ForegroundColor Green
@@ -137,12 +140,15 @@ function Enumerate {
     $a1 = gci HKLM:\SOFTWARE
     $a2 = gci "C:\Program Files" -Force
     $a3 = gci "C:\Program Files (x86)" -Force
+    $a4 = gci "C:\Windows\Temp" -Force
     Write-Output "HKLM:\SOFTWARE`n--------------"
     Write-Output $a1
     Write-Output "`nC:\Program Files\`n-----------------"
     Write-Output $a2
     Write-Output "`nC:\Program Files (x86)\`n-----------------------"
     Write-Output $a3
+    Write-Output "`nC:\Windows\Temp\`n-----------------------"
+    Write-Output $a4
     Write-Output "==========END Installed Applications=========="
 
     Write-Output "==========START Scheduled Tasks=========="
@@ -172,6 +178,20 @@ function Enumerate {
     gci "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup" -Force | Out-Host
     Write-Output "==========END Startup Folder=========="
     Write-Output "`n"
+
+    Get-SmbShare | ForEach-Object {
+    $share = $_
+    $access = Get-SmbShareAccess -Name $share.Name
+    $access | Select-Object @{Name="ShareName";Expression={$share.Name}}, 
+                            @{Name="SharePath";Expression={$share.Path}},
+                            @{Name="AccessRight";Expression={$_.AccessRight}},
+                            @{Name="AccountName";Expression={$_.AccountName}}
+    } | Out-Host
+    Read-Host -Prompt "Press enter to remove and limit unnecessary shares!"
+    net share C$ /delete
+    net share ADMIN$ /delete
+    Read-Host -Prompt "Stop HERE! Change permissions on shares to readonly in the gui! If done, press enter!"
+
     Clear-History
     try {
         rm $(Get-PSReadLineOption).HistorySavePath -ErrorAction Stop
@@ -188,11 +208,7 @@ function Enumerate {
 
 function Phase2 {
     Write-Output "Starting Phase 2!"
-    Get-SmbShare | Get-SmbShareAccess | Sort-Object | Out-Host
     Read-Host -Prompt "Press enter to remove and limit unnecessary shares!"
-    net share C$ /delete
-    net share ADMIN$ /delete
-    Read-Host -Prompt "Stop HERE! Change permissions on shares to readonly in the gui! If done, press enter!"
     Read-Host -Prompt "Stopping services: WebClient, Spooler, WinRM"
     Get-Service "WebClient" | Stop-Service # MAY NOT BE PRESENT ON SOME MACHINES
     Get-Service "Spooler" | Stop-Service
@@ -258,4 +274,6 @@ function Phase2 {
     Read-Host -Prompt "Press enter to enable LSA protections"
     New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPL" -Value 1
     New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPLBoot" -Value 1
+
+    Write-Host "[!] Finished Phase2!! Begin firewall rules!" -ForegroundColor Yellow
 }
