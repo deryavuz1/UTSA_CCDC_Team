@@ -31,13 +31,39 @@ Function Get-RegistryKeys {
 
 }
 
+function Get-Tools {
+    Write-Host "[+] Collecting tools..."
+    Write-Host "[+] Downloading SystemInformer"
+    Invoke-WebRequest https://phoenixnap.dl.sourceforge.net/project/systeminformer/systeminformer-3.2.25011-release-setup.exe?viasf=1 -OutFile SystemInformer.exe
+    Write-Host "[+] Downloading Cable"
+    Invoke-WebRequest https://github.com/logangoins/Cable/releases/download/1.0/Cable.exe -OutFile Cable.exe
+    Write-Host "[+] Downloading Autoruns"
+    Invoke-WebRequest https://download.sysinternals.com/files/Autoruns.zip -OutFile Autoruns.zip
+    Write-Host "[+] Downloading Sysmon"
+    Invoke-WebRequest https://download.sysinternals.com/files/Sysmon.zip -OutFile Sysmon.zip
+    Write-Host "[+] Downloading Firefox"
+    Invoke-WebRequest "https://download.mozilla.org/?product=firefox-stub&os=win&lang=en-US" -OutFile FirefoxInstaller.exe
+    Write-Host "[+] Finished downloading tools!" -ForegroundColor Green
+
+    Write-Host "[+] Expanding archives"
+    Expand-Archive -Path .\Autoruns.zip
+    Expand-Archive -Path .\Sysmon.zip
+    Write-Host "[+] Expanded Archives"
+    Remove-Item .\Autoruns.zip
+    Remove-Item .\Sysmon.zip
+    Write-Host "[+] Removed zip files"
+
+    Sysmon\Sysmon.exe -i -accepteula > $null
+    Write-Host "[+] Installed sysmon"
+
+    Write-Host "[+] Done!" -ForegroundColor Green
+}
+
 function Enumerate {
     param (
         [System.Security.SecureString]$AdminPass
     )
     Write-Host "[+] Start Windows Updates and Defender Protection Updates!!" -ForegroundColor Blue
-    Write-Host "[+] Installing Firefox! Make sure to actually run the binary afterwards!" -ForegroundColor Yellow
-    iwr "https://download.mozilla.org/?product=firefox-stub&os=win&lang=en-US" -OutFile C:\FirefoxInstaller.exe
     Write-Output "=========START SYSTEM INFO========="
     $hostinfo = Get-ComputerInfo
     Write-Host "[+] Retrieved host info!" -ForegroundColor Green
@@ -205,7 +231,6 @@ function Enumerate {
 }
 
 
-
 function Phase2 {
     Write-Output "Starting Phase 2!"
     Read-Host -Prompt "Press enter to remove and limit unnecessary shares!"
@@ -276,4 +301,36 @@ function Phase2 {
     New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPLBoot" -Value 1
 
     Write-Host "[!] Finished Phase2!! Begin firewall rules!" -ForegroundColor Yellow
+}
+
+function Generate-WDAC {
+    $PolicyPath=$env:userprofile+"\Desktop\"
+    $PolicyName="Policy"
+    $Policy=$PolicyPath+$PolicyName+".xml"
+    $DriversPolicy=$PolicyPath+"drivers.xml"
+    $DefaultWindowsPolicy=$env:windir+"\schemas\CodeIntegrity\ExamplePolicies\DefaultWindows_Audit.xml"
+
+    Write-Host "[+] Generating policy..."
+    New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback FileName,Hash -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\ 3> CIPolicyLog.txt
+    New-CIPolicy -FilePath $DriversPolicy -Level SignedVersion -Fallback FilePublisher,Hash -ScanPath C:\Windows\System32\drivers\ 3> CIDriversLog.txt
+    Write-Host "[+] Generated policies!" -ForegroundColor Green
+
+    Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$DefaultWindowsPolicy
+    Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$DriversPolicy
+    Write-Host "[+] Merged policies"
+    Set-CIPolicyIdInfo -FilePath $Policy -PolicyName $PolicyName
+    Set-CIPolicyVersion -FilePath $Policy -Version "1.0.0.0"
+    Set-RuleOption -FilePath $Policy -Option 3 -Delete  # Audit Mode...add -Delete to put it in enforce mode
+    Set-RuleOption -FilePath $Policy -Option 6  # Unsigned Policy
+    Set-RuleOption -FilePath $Policy -Option 9  # Advanced Boot Menu
+    Set-RuleOption -FilePath $Policy -Option 12  # Enforce Store Apps
+    Set-RuleOption -FilePath $Policy -Option 14  # Intelligent Security Graph Authorization
+    Set-RuleOption -FilePath $Policy -Option 16  # No Reboot
+    Set-RuleOption -FilePath $Policy -Option 18  # File Path
+    Set-RuleOption -FilePath $Policy -Option 19  # Dynamic Code Security
+    Write-Host "[+] Added configuration rules to policy!"
+
+    $PolicyBin = $PolicyPath+"SiPolicy.p7b"
+    ConvertFrom-CIPolicy -XmlFilePath $Policy -BinaryFilePath $PolicyBin
+    Write-Host "[+] Generated policy at $PolicyBin"
 }
