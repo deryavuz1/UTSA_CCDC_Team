@@ -1,0 +1,46 @@
+iptables -L
+iptables -A OUTPUT -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+iptables -L
+iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -i lo -j ACCEPT
+iptables -L
+iptables -L --list-numbers
+iptables -L --line-numbers
+iptables -d OUTPUT 1
+iptables --help
+iptables -D OUTPUT 1
+iptables -L
+iptables -L --line-numbers
+iptables -D INPUT 2
+iptables -L --line-numbers
+iptables -D INPUT 3
+iptables -L --line-numbers
+iptables -D INPUT 1
+iptables -L --line-numbers
+clear
+iptables -L --line-numbers
+iptavles -A INPUT -i lo -j ACCEPT
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -i lo -j ACCEPT
+iptables -A INPUT -p tcp --dport 22 -m limit --limit 3/min --limit-burst 5 -j ACCEPT
+iptables -A INPUT -p tcp --dport 22 -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p tcp --dport 389 -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p tcp --dport 3636 -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p tcp --dport 363 -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p tcp --dport 636 -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+iptables -A INPUT -p tcp --dport 323 -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+iptables -L
+iptables -L --line-numbers
+iptables -L --line-numbers -n
+iptables -D INPUT 6
+iptables -L --line-numbers -n
+iptables -D INPUT 6
+iptables -L --line-numbers -n
+iptables -A OUTPUT -p tcp --sport 40001:65535 -j ACCEPT
+iptables -A OUTPUT -p udp --sport 40001:65535 -j ACCEPT
+iptables -P INPUT DROP
+iptables -P OUTPUT DROP
+iptables -P FORWARD DROP
+iptables-save > /etc/iptables.rules
