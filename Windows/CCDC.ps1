@@ -272,6 +272,7 @@ function Phase2 {
     Set-MpPreference -DisableScriptScanning 0
     Set-MpPreference -DisableArchiveScanning 0
     Set-MpPreference -EnableControlledFolderAccess Enabled
+    Add-MpPreference -ControlledFolderAccessProtectedFolders "C:\inetpub"
 
     Read-Host -Prompt "Press enter to add ASR rules & restart Defender"
     Add-MpPreference -AttackSurfaceReductionRules_Ids 56a863a9-875e-4185-98a7-b882c64b5ce5 -AttackSurfaceReductionRules_Actions Enabled # Block abuse of exploited vulnerable signed drivers
