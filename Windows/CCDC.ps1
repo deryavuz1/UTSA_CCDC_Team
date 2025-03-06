@@ -311,8 +311,21 @@ function Generate-WDAC {
     $DriversPolicy=$PolicyPath+"drivers.xml"
     $DefaultWindowsPolicy=$env:windir+"\schemas\CodeIntegrity\ExamplePolicies\DefaultWindows_Audit.xml"
 
+    if (Test-Path "C:\Program Files\Microsoft\Exchange Server\") {
+        Write-Host "[!] Detected an Exchange server! Policy creation for this type of server will result in issues" -ForegroundColor Red
+        return
+    }
+
     Write-Host "[+] Generating policy..."
-    New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback FileName,Hash -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\ 3> CIPolicyLog.txt
+
+    if ((Get-WindowsFeature Web-Server).InstallState -eq "Installed") {
+        Write-Host "[!] Detected an IIS Server! Adjusting WDAC policy creation..." -ForegroundColor Yellow
+        New-CIPolicy -FilePath $PolicyPath+"inetsrv.xml" -Level FilePath -ScanPath "C:\Windows\System32\inetsrv\"
+        New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback FileName,Hash -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\ 3> CIPolicyLog.txt
+        Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$PolicyPath+"inetsrv.xml"
+    } else {
+        New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback FileName,Hash -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\ 3> CIPolicyLog.txt
+    }
     New-CIPolicy -FilePath $DriversPolicy -Level SignedVersion -Fallback FilePublisher,Hash -ScanPath C:\Windows\System32\drivers\ 3> CIDriversLog.txt
     Write-Host "[+] Generated policies!" -ForegroundColor Green
 
