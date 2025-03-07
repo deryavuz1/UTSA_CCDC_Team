@@ -271,6 +271,7 @@ function Phase2 {
     Set-MpPreference -DisableBehaviorMonitoring 0
     Set-MpPreference -DisableScriptScanning 0
     Set-MpPreference -DisableArchiveScanning 0
+    Set-MpPreference -PUAProtection 1
     Set-MpPreference -EnableControlledFolderAccess Enabled
     Add-MpPreference -ControlledFolderAccessProtectedFolders "C:\inetpub"
 
