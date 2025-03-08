@@ -323,11 +323,11 @@ function Generate-WDAC {
 
     if ((Get-WindowsFeature Web-Server).InstallState -eq "Installed") {
         Write-Host "[!] Detected an IIS Server! Adjusting WDAC policy creation..." -ForegroundColor Yellow
-        New-CIPolicy -FilePath $IISPolicy -Level FilePublisher -Fallback FileName,Hash -ScanPath "C:\Windows\System32\inetsrv\"
-        New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback FileName,Hash -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\,'c:\$Recycle.Bin\' > CIPolicyLog.txt
+        New-CIPolicy -FilePath $IISPolicy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\Windows\System32\inetsrv\"
+        New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback Hash,FileName -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\,'c:\$Recycle.Bin\' > CIPolicyLog.txt
         Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$IISPolicy > $null
     } else {
-        New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback FileName,Hash -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\,'c:\$Recycle.Bin\' > CIPolicyLog.txt
+        New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback Hash,FileName -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\,'c:\$Recycle.Bin\' > CIPolicyLog.txt
     }
     New-CIPolicy -FilePath $DriversPolicy -Level SignedVersion -Fallback FilePublisher,Hash -ScanPath C:\Windows\System32\drivers\ > CIDriversLog.txt
     Write-Host "[+] Generated policies!" -ForegroundColor Green
