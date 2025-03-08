@@ -274,6 +274,7 @@ function Phase2 {
     Set-MpPreference -PUAProtection 1
     Set-MpPreference -EnableControlledFolderAccess Enabled
     Add-MpPreference -ControlledFolderAccessProtectedFolders "C:\inetpub"
+    Add-MpPreference -ControlledFolderAccessProtectedFolders "C:\Windows\System32\CodeIntegrity\"
 
     Read-Host -Prompt "Press enter to add ASR rules & restart Defender"
     Add-MpPreference -AttackSurfaceReductionRules_Ids 56a863a9-875e-4185-98a7-b882c64b5ce5 -AttackSurfaceReductionRules_Actions Enabled # Block abuse of exploited vulnerable signed drivers
@@ -310,6 +311,7 @@ function Generate-WDAC {
     $PolicyName="Policy"
     $Policy=$PolicyPath+$PolicyName+".xml"
     $DriversPolicy=$PolicyPath+"drivers.xml"
+    $IISPolicy=$PolicyPath+"inetsrv.xml"
     $DefaultWindowsPolicy=$env:windir+"\schemas\CodeIntegrity\ExamplePolicies\DefaultWindows_Audit.xml"
 
     if (Test-Path "C:\Program Files\Microsoft\Exchange Server\") {
@@ -321,17 +323,17 @@ function Generate-WDAC {
 
     if ((Get-WindowsFeature Web-Server).InstallState -eq "Installed") {
         Write-Host "[!] Detected an IIS Server! Adjusting WDAC policy creation..." -ForegroundColor Yellow
-        New-CIPolicy -FilePath $PolicyPath+"inetsrv.xml" -Level FilePath -ScanPath "C:\Windows\System32\inetsrv\"
-        New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback FileName,Hash -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\ 3> CIPolicyLog.txt
-        Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$PolicyPath+"inetsrv.xml"
+        New-CIPolicy -FilePath $IISPolicy -Level FilePublisher -Fallback FileName,Hash -ScanPath "C:\Windows\System32\inetsrv\"
+        New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback FileName,Hash -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\,'c:\$Recycle.Bin\' > CIPolicyLog.txt
+        Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$IISPolicy > $null
     } else {
-        New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback FileName,Hash -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\ 3> CIPolicyLog.txt
+        New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback FileName,Hash -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\,'c:\$Recycle.Bin\' > CIPolicyLog.txt
     }
-    New-CIPolicy -FilePath $DriversPolicy -Level SignedVersion -Fallback FilePublisher,Hash -ScanPath C:\Windows\System32\drivers\ 3> CIDriversLog.txt
+    New-CIPolicy -FilePath $DriversPolicy -Level SignedVersion -Fallback FilePublisher,Hash -ScanPath C:\Windows\System32\drivers\ > CIDriversLog.txt
     Write-Host "[+] Generated policies!" -ForegroundColor Green
 
-    Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$DefaultWindowsPolicy
-    Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$DriversPolicy
+    Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$DefaultWindowsPolicy > $null
+    Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$DriversPolicy > $null
     Write-Host "[+] Merged policies"
     Set-CIPolicyIdInfo -FilePath $Policy -PolicyName $PolicyName
     Set-CIPolicyVersion -FilePath $Policy -Version "1.0.0.0"
@@ -341,11 +343,23 @@ function Generate-WDAC {
     Set-RuleOption -FilePath $Policy -Option 12  # Enforce Store Apps
     Set-RuleOption -FilePath $Policy -Option 14  # Intelligent Security Graph Authorization
     Set-RuleOption -FilePath $Policy -Option 16  # No Reboot
-    Set-RuleOption -FilePath $Policy -Option 18  # File Path
     Set-RuleOption -FilePath $Policy -Option 19  # Dynamic Code Security
     Write-Host "[+] Added configuration rules to policy!"
 
     $PolicyBin = $PolicyPath+"SiPolicy.p7b"
-    ConvertFrom-CIPolicy -XmlFilePath $Policy -BinaryFilePath $PolicyBin
+    ConvertFrom-CIPolicy -XmlFilePath $Policy -BinaryFilePath $PolicyBin > $null
     Write-Host "[+] Generated policy at $PolicyBin"
+
+    $continue = Read-Host -Prompt "`nCopy and refresh policy? [y/N]"
+    if ($continue -match "^[Yy]$") {
+        try {
+            copy $PolicyBin "C:\Windows\System32\CodeIntegrity\"
+            Write-Host "[+] Moved policy!"
+            Invoke-CimMethod -Namespace root\Microsoft\Windows\CI -ClassName PS_UpdateAndCompareCIPolicy -MethodName Update -Arguments @{FilePath = "C:\Windows\System32\CodeIntegrity\SiPolicy.p7b"} > $null
+            Write-Host "[+] Refreshed policy!" -ForegroundColor Green
+        } catch {
+            Write-Host "[!] Failed to copy policy! Is controlled folder access on?" -ForegroundColor Red
+        }
+    }
+    Write-Host "[+] Exiting..."
 }
