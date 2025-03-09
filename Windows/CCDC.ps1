@@ -57,7 +57,15 @@ function Get-Tools {
     Write-Host "[+] Removed zip files"
 
     C:\Tools\Sysmon\Sysmon.exe -i -accepteula > $null
-    Write-Host "[+] Installed sysmon"
+    Write-Host "[+] Installed Sysmon"
+    $acl = Get-ACL "C:\Windows\Sysmon.exe"
+    $acl.SetAccessRuleProtection($True, $False)
+    Set-ACL "C:\Windows\Sysmon.exe" $acl | Out-Null
+    $sddl = "O:BAG:DUD:PAI(A;;0x1200a9;;;SY)(A;;FA;;;BA)"
+    $FileSecurity = New-Object System.Security.AccessControl.FileSecurity
+    $FileSecurity.SetSecurityDescriptorSddlForm($SDDL)
+    Set-ACL -Path "C:\Windows\Sysmon.exe" -ACLObject $FileSecurity
+    Write-Host "[+] Hardened Sysmon service configuration"
 
     Write-Host "[+] Done!" -ForegroundColor Green
 }
@@ -344,10 +352,15 @@ function Generate-WDAC {
     Wait-Job $pf64,$pf32,$pd,$drivers,$tools
     if ($iis) { Wait-Job $iis ; Remove-Job $iis }
     Remove-Job $pf64,$pf32,$pd,$drivers,$tools
+    $additional_blocks = New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath C:\Windows\System32\vssadmin.exe -Deny
+    $additional_blocks += New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath C:\Windows\System32\vssuirun.exe -Deny
+    $additional_blocks += New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath C:\Windows\System32\ntdsutil.exe -Deny
+    $additional_blocks += New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath C:\Windows\System32\reg.exe -Deny
     Write-Host "[+] Generated policies!" -ForegroundColor Green
     
     Write-Host "[+] Merging policies..."
     Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $DefaultWindowsPolicy,$pf32Policy,$pf64Policy,$pdPolicy,$DriversPolicy,$toolsPolicy > $null
+    Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy -Rules $additional_blocks > $null
     if ($iis) { Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$IISPolicy > $null }
     Write-Host "[+] Merged policies"
     
