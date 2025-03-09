@@ -369,10 +369,12 @@ function Generate-WDAC {
     Set-RuleOption -FilePath $Policy -Option 3 -Delete  # Audit Mode...add -Delete to put it in enforce mode
     Set-RuleOption -FilePath $Policy -Option 6  # Unsigned Policy
     Set-RuleOption -FilePath $Policy -Option 9  # Advanced Boot Menu
-    Set-RuleOption -FilePath $Policy -Option 12  # Enforce Store Apps
-    Set-RuleOption -FilePath $Policy -Option 14  # Intelligent Security Graph Authorization
-    Set-RuleOption -FilePath $Policy -Option 16  # No Reboot
-    Set-RuleOption -FilePath $Policy -Option 19  # Dynamic Code Security
+    Set-RuleOption -FilePath $Policy -Option 10 # Boot Audit on Failure
+    Set-RuleOption -FilePath $Policy -Option 11 # Disabled:Script Enforcement
+    Set-RuleOption -FilePath $Policy -Option 12 # Enforce Store Apps
+    Set-RuleOption -FilePath $Policy -Option 14 # Intelligent Security Graph Authorization
+    Set-RuleOption -FilePath $Policy -Option 16 # No Reboot
+    Set-RuleOption -FilePath $Policy -Option 19 # Dynamic Code Security
     Write-Host "[+] Added configuration rules to policy!"
 
     $PolicyBin = $PolicyPath+"SiPolicy.p7b"
