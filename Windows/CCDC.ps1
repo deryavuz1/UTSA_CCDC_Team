@@ -32,28 +32,31 @@ Function Get-RegistryKeys {
 }
 
 function Get-Tools {
+    New-Item -Path C:\ -Name "Tools" -ItemType Directory -Force > $null
+    Write-Host "[+] Created tools directory!"
+
     Write-Host "[+] Collecting tools..."
     Write-Host "[+] Downloading SystemInformer"
-    Invoke-WebRequest https://phoenixnap.dl.sourceforge.net/project/systeminformer/systeminformer-3.2.25011-release-setup.exe?viasf=1 -OutFile SystemInformer.exe
+    Invoke-WebRequest https://phoenixnap.dl.sourceforge.net/project/systeminformer/systeminformer-3.2.25011-release-setup.exe?viasf=1 -OutFile "C:\Tools\SystemInformer.exe"
     Write-Host "[+] Downloading Cable"
-    Invoke-WebRequest https://github.com/logangoins/Cable/releases/download/1.0/Cable.exe -OutFile Cable.exe
+    Invoke-WebRequest https://github.com/logangoins/Cable/releases/download/1.0/Cable.exe -OutFile "C:\Tools\Cable.exe"
     Write-Host "[+] Downloading Autoruns"
-    Invoke-WebRequest https://download.sysinternals.com/files/Autoruns.zip -OutFile Autoruns.zip
+    Invoke-WebRequest https://download.sysinternals.com/files/Autoruns.zip -OutFile "C:\Tools\Autoruns.zip"
     Write-Host "[+] Downloading Sysmon"
-    Invoke-WebRequest https://download.sysinternals.com/files/Sysmon.zip -OutFile Sysmon.zip
+    Invoke-WebRequest https://download.sysinternals.com/files/Sysmon.zip -OutFile "C:\Tools\Sysmon.zip"
     Write-Host "[+] Downloading Firefox"
-    Invoke-WebRequest "https://download.mozilla.org/?product=firefox-stub&os=win&lang=en-US" -OutFile FirefoxInstaller.exe
+    Invoke-WebRequest "https://download.mozilla.org/?product=firefox-stub&os=win&lang=en-US" -OutFile "C:\Tools\FirefoxInstaller.exe"
     Write-Host "[+] Finished downloading tools!" -ForegroundColor Green
 
     Write-Host "[+] Expanding archives"
-    Expand-Archive -Path .\Autoruns.zip
-    Expand-Archive -Path .\Sysmon.zip
+    Expand-Archive -Path "C:\Tools\Autoruns.zip" -DestinationPath "C:\Tools\Autoruns" -Force
+    Expand-Archive -Path "C:\Tools\Sysmon.zip" -DestinationPath "C:\Tools\Sysmon" -Force
     Write-Host "[+] Expanded Archives"
-    Remove-Item .\Autoruns.zip
-    Remove-Item .\Sysmon.zip
+    Remove-Item "C:\Tools\Autoruns.zip"
+    Remove-Item "C:\Tools\Sysmon.zip"
     Write-Host "[+] Removed zip files"
 
-    Sysmon\Sysmon.exe -i -accepteula > $null
+    C:\Tools\Sysmon\Sysmon.exe -i -accepteula > $null
     Write-Host "[+] Installed sysmon"
 
     Write-Host "[+] Done!" -ForegroundColor Green
@@ -307,12 +310,19 @@ function Phase2 {
 }
 
 function Generate-WDAC {
+    param([switch] $Refresh)
+
     $PolicyPath=$env:userprofile+"\Desktop\"
     $PolicyName="Policy"
     $Policy=$PolicyPath+$PolicyName+".xml"
     $DriversPolicy=$PolicyPath+"drivers.xml"
     $IISPolicy=$PolicyPath+"inetsrv.xml"
+    $pf64Policy=$PolicyPath+"pf64.xml"
+    $pf32Policy=$PolicyPath+"pf32.xml"
+    $pdPolicy=$PolicyPath+"pd.xml"
+    $toolsPolicy=$PolicyPath+"tools.xml"
     $DefaultWindowsPolicy=$env:windir+"\schemas\CodeIntegrity\ExamplePolicies\DefaultWindows_Audit.xml"
+    New-Item $Policy -Force > $null
 
     if (Test-Path "C:\Program Files\Microsoft\Exchange Server\") {
         Write-Host "[!] Detected an Exchange server! Policy creation for this type of server will result in issues" -ForegroundColor Red
@@ -320,21 +330,27 @@ function Generate-WDAC {
     }
 
     Write-Host "[+] Generating policy..."
+    $pf64 = Start-Job -ScriptBlock { param($pf64Policy) New-CIPolicy -FilePath $pf64Policy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\Program Files\" -UserPEs -OmitPaths "C:\Program Files\WindowsApps\" } -ArgumentList $pf64Policy
+    $pf32 = Start-Job -ScriptBlock { param($pf32Policy) New-CIPolicy -FilePath $pf32Policy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\Program Files(x86)\" -UserPEs } -ArgumentList $pf32Policy
+    $pd = Start-Job -ScriptBlock { param($pdPolicy) New-CIPolicy -FilePath $pdPolicy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\ProgramData\" -UserPEs } -ArgumentList $pdPolicy
+    $tools = Start-Job -ScriptBlock { param($toolsPolicy) New-CIPolicy -FilePath $toolsPolicy -Level FilePublisher -Fallback Hash -ScanPath "C:\Tools\" -UserPEs } -ArgumentList $toolsPolicy
 
     if ((Get-WindowsFeature Web-Server).InstallState -eq "Installed") {
         Write-Host "[!] Detected an IIS Server! Adjusting WDAC policy creation..." -ForegroundColor Yellow
-        New-CIPolicy -FilePath $IISPolicy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\Windows\System32\inetsrv\"
-        New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback Hash,FileName -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\,'c:\$Recycle.Bin\' > CIPolicyLog.txt
-        Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$IISPolicy > $null
-    } else {
-        New-CIPolicy -FilePath $Policy -Level FilePublisher -Fallback Hash,FileName -ScanPath c:\ -UserPEs -OmitPaths C:\Windows\,'C:\Program Files\WindowsApps\',c:\windows.old\,c:\users\,'c:\$Recycle.Bin\' > CIPolicyLog.txt
+        $iis = Start-Job -ScriptBlock { param($IISPolicy) New-CIPolicy -FilePath $IISPolicy -Level FilePublisher -Fallback Hash,Filename -ScanPath "C:\Windows\System32\inetsrv\" } -ArgumentList $IISPolicy
     }
-    New-CIPolicy -FilePath $DriversPolicy -Level SignedVersion -Fallback FilePublisher,Hash -ScanPath C:\Windows\System32\drivers\ > CIDriversLog.txt
+    $drivers = Start-Job -ScriptBlock { param($DriversPolicy) New-CIPolicy -FilePath $DriversPolicy -Level SignedVersion -Fallback FilePublisher,Hash -ScanPath "C:\Windows\System32\drivers\" } -ArgumentList $DriversPolicy
+    
+    Wait-Job $pf64,$pf32,$pd,$drivers,$tools
+    if ($iis) { Wait-Job $iis ; Remove-Job $iis }
+    Remove-Job $pf64,$pf32,$pd,$drivers,$tools
     Write-Host "[+] Generated policies!" -ForegroundColor Green
-
-    Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$DefaultWindowsPolicy > $null
-    Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$DriversPolicy > $null
+    
+    Write-Host "[+] Merging policies..."
+    Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $DefaultWindowsPolicy,$pf32Policy,$pf64Policy,$pdPolicy,$DriversPolicy,$toolsPolicy > $null
+    if ($iis) { Merge-CIPolicy -OutputFilePath $Policy -PolicyPaths $Policy,$IISPolicy > $null }
     Write-Host "[+] Merged policies"
+    
     Set-CIPolicyIdInfo -FilePath $Policy -PolicyName $PolicyName
     Set-CIPolicyVersion -FilePath $Policy -Version "1.0.0.0"
     Set-RuleOption -FilePath $Policy -Option 3 -Delete  # Audit Mode...add -Delete to put it in enforce mode
@@ -350,8 +366,8 @@ function Generate-WDAC {
     ConvertFrom-CIPolicy -XmlFilePath $Policy -BinaryFilePath $PolicyBin > $null
     Write-Host "[+] Generated policy at $PolicyBin"
 
-    $continue = Read-Host -Prompt "`nCopy and refresh policy? [y/N]"
-    if ($continue -match "^[Yy]$") {
+    if ($Refresh) {
+        Write-Host "[+] Refreshing policy..."
         try {
             copy $PolicyBin "C:\Windows\System32\CodeIntegrity\"
             Write-Host "[+] Moved policy!"
@@ -362,4 +378,8 @@ function Generate-WDAC {
         }
     }
     Write-Host "[+] Exiting..."
+}
+
+function Refresh-WDAC {
+    Invoke-CimMethod -Namespace root\Microsoft\Windows\CI -ClassName PS_UpdateAndCompareCIPolicy -MethodName Update -Arguments @{FilePath = "C:\Windows\System32\CodeIntegrity\SiPolicy.p7b"}
 }

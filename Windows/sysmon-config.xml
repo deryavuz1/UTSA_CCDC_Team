@@ -1233,6 +1233,15 @@
 		</FileBlockExecutable>
 	</RuleGroup>
 
+	<RuleGroup groupRelation="or">
+		<FileBlockExecutable onmatch="exclude">
+			<Rule groupRelation="and">
+				<User condition="end with">\Administrator</User>
+				<TargetFilename condition="begin with">C:\Tools\</TargetFilename>
+			</Rule>
+		</FileBlockExecutable>
+	</RuleGroup>
+
 	<RuleGroup name="Generic PE File Block" groupRelation="or">
 		<FileBlockExecutable onmatch="include">
 			<TargetFilename condition="begin with">C:\</TargetFilename>
