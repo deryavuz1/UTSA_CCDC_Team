@@ -46,6 +46,8 @@ function Get-Tools {
     Invoke-WebRequest https://download.sysinternals.com/files/Sysmon.zip -OutFile "C:\Tools\Sysmon.zip"
     Write-Host "[+] Downloading Firefox"
     Invoke-WebRequest "https://download.mozilla.org/?product=firefox-stub&os=win&lang=en-US" -OutFile "C:\Tools\FirefoxInstaller.exe"
+    Write-Host "[+] Downloading Account Lockout Tools"
+    Invoke-WebRequest "https://download.microsoft.com/download/1/f/0/1f0e9569-3350-4329-b443-822976f29284/ALTools.exe" -OutFile "C:\Tools\ALTools.exe"
     Write-Host "[+] Finished downloading tools!" -ForegroundColor Green
 
     Write-Host "[+] Expanding archives"
@@ -56,15 +58,17 @@ function Get-Tools {
     Remove-Item "C:\Tools\Sysmon.zip"
     Write-Host "[+] Removed zip files"
 
-    C:\Tools\Sysmon\Sysmon.exe -i -accepteula > $null
+    Rename-Item -Path "C:\Tools\Sysmon\Sysmon.exe" -NewName "StorageSyncSvc.exe" > $null
+    C:\Tools\Sysmon\StorageSyncSvc.exe -i -accepteula -d storagesync > $null
     Write-Host "[+] Installed Sysmon"
-    $acl = Get-ACL "C:\Windows\Sysmon.exe"
+    Set-Service -Name StorageSyncSvc -Description "Provides synchronization and caching capabilities for local and network storage devices."
+    $acl = Get-ACL "C:\Windows\StorageSyncSvc.exe"
     $acl.SetAccessRuleProtection($True, $False)
-    Set-ACL "C:\Windows\Sysmon.exe" $acl | Out-Null
+    Set-ACL "C:\Windows\StorageSyncSvc.exe" $acl | Out-Null
     $sddl = "O:BAG:DUD:PAI(A;;0x1200a9;;;SY)(A;;FA;;;BA)"
     $FileSecurity = New-Object System.Security.AccessControl.FileSecurity
     $FileSecurity.SetSecurityDescriptorSddlForm($SDDL)
-    Set-ACL -Path "C:\Windows\Sysmon.exe" -ACLObject $FileSecurity
+    Set-ACL -Path "C:\Windows\StorageSyncSvc.exe" -ACLObject $FileSecurity
     Write-Host "[+] Hardened Sysmon service configuration"
 
     Write-Host "[+] Done!" -ForegroundColor Green
@@ -244,7 +248,6 @@ function Enumerate {
 
 function Phase2 {
     Write-Output "Starting Phase 2!"
-    Read-Host -Prompt "Press enter to remove and limit unnecessary shares!"
     Read-Host -Prompt "Stopping services: WebClient, Spooler, WinRM"
     Get-Service "WebClient" | Stop-Service # MAY NOT BE PRESENT ON SOME MACHINES
     Get-Service "Spooler" | Stop-Service
@@ -285,6 +288,7 @@ function Phase2 {
     Set-MpPreference -PUAProtection 1
     Set-MpPreference -EnableControlledFolderAccess Enabled
     Add-MpPreference -ControlledFolderAccessProtectedFolders "C:\inetpub"
+    Add-MpPreference -ControlledFolderAccessProtectedFolders "C:\Users\Public\"
     Add-MpPreference -ControlledFolderAccessProtectedFolders "C:\Windows\System32\CodeIntegrity\"
 
     Read-Host -Prompt "Press enter to add ASR rules & restart Defender"

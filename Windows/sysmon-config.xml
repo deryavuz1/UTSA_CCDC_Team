@@ -64,6 +64,7 @@
 	<!--SYSMON META CONFIG-->
 	<HashAlgorithms>md5,sha256,IMPHASH</HashAlgorithms> <!-- Both MD5 and SHA256 are the industry-standard algorithms. Remove IMPHASH if you do not use DLL import fingerprinting. -->
 	<CheckRevocation/> <!-- Check loaded drivers, log if their code-signing certificate has been revoked, in case malware stole one to sign a kernel driver -->
+	<DriverName>storagesync</DriverName>
 
 	<EventFiltering>
 
@@ -1152,23 +1153,6 @@
 		</FileBlockExecutable>
 	</RuleGroup>
 
-	<RuleGroup name="Allow Firefox" groupRelation="or">
-		<FileBlockExecutable onmatch="exclude">
-			<Rule groupRelation="and">
-				<Image condition="is">C:\Program Files\Mozilla Firefox\updater.exe</Image>
-				<TargetFilename condition="begin with">C:\Program Files\Mozilla Firefox\</TargetFilename>
-			</Rule>
-			<Rule groupRelation="or">
-				<Image condition="is">C:\Program Files\Mozilla Firefox\updater.exe</Image>
-				<TargetFilename condition="begin with">C:\Program Files (x86)\Mozilla Maintenance Service\</TargetFilename>
-			</Rule>
-			<Rule groupRelation="and">
-				<Image condition="is">C:\Program Files\Mozilla Firefox\firefox.exe</Image>
-				<TargetFilename condition="begin with">C:\Users\*\AppData\Roaming\Mozilla\Firefox\Profiles\</TargetFilename>
-			</Rule>
-		</FileBlockExecutable>
-	</RuleGroup>
-
 	<RuleGroup name="Allow Windows and Antivirus Updates" groupRelation="or">
 		<FileBlockExecutable onmatch="exclude">
 			<Rule groupRelation="and">
@@ -1193,12 +1177,6 @@
 				<Image condition="is">C:\Windows\system32\MRT.exe</Image>
 				<TargetFilename condition="begin with">C:\Windows\System32\MRT\</TargetFilename>
 			</Rule>
-		</FileBlockExecutable>
-	</RuleGroup>
-
-	<RuleGroup name="Allow SYSTEM" groupRelation="or">
-		<FileBlockExecutable onmatch="exclude">
-			<User condition="is">NT AUTHORITY\SYSTEM</User>
 		</FileBlockExecutable>
 	</RuleGroup>
 
@@ -1233,23 +1211,48 @@
 		</FileBlockExecutable>
 	</RuleGroup>
 
-	<RuleGroup groupRelation="or">
+	<RuleGroup name="Generic" groupRelation="or">
+		<FileBlockExecutable onmatch="include">
+			<Hashes name="Impacket PSExec" condition="contains all">MD5=6983F7001DE10F4D19FC2D794C3EB534,SHA256=3C2FE308C0A563E06263BBACF793BBE9B2259D795FCC36B953793A7E499E7F71,IMPHASH=4749670AC3D28D6761142B0DCB4F5076</Hashes>
+			<Hashes name="PSExec" condition="contains all">MD5=db89ec570e6281934a5c5fcf7f4c8967,SHA256=EDFAE1A69522F87B12C6DAC3225D930E4848832E3C551EE1E7D31736BF4525EF,IMPHASH=8a589b59271d320348f6cdec90a97e6c</Hashes>
+			<Hashes name="PSExec" condition="contains all">MD5=24a648a48741b1ac809e47b9543c6f12,SHA256=078163d5c16f64caa5a14784323fd51451b8c831c73396b967b4e35e6879937b,IMPHASH=1193bc223dad681f22f8248608cbb592</Hashes>
+			<TargetFilename name="Generic block" condition="begin with">C:\</TargetFilename>
+		</FileBlockExecutable>
+		<FileBlockExecutable onmatch="exclude">
+			<Hashes condition="contains all">MD5=7663C565BF28115506CB7EBD1DA389E0,SHA256=D9C8FDFDCE510FD9922DA3A1084B6AC4476C1407D1D8BBB67FC0A61988552771,IMPHASH=A039666F8D08DD16E0909469DA998438</Hashes>
+		</FileBlockExecutable>
+		<FileBlockExecutable onmatch="exclude">
+			<Rule groupRelation="and">
+				<User condition="is">NT AUTHORITY\SYSTEM</User>
+				<Hashes condition="excludes all">MD5=6983F7001DE10F4D19FC2D794C3EB534,SHA256=3C2FE308C0A563E06263BBACF793BBE9B2259D795FCC36B953793A7E499E7F71,IMPHASH=4749670AC3D28D6761142B0DCB4F5076</Hashes>
+				<Hashes condition="excludes all">MD5=db89ec570e6281934a5c5fcf7f4c8967,SHA256=EDFAE1A69522F87B12C6DAC3225D930E4848832E3C551EE1E7D31736BF4525EF,IMPHASH=8a589b59271d320348f6cdec90a97e6c</Hashes>
+				<Hashes condition="excludes all">MD5=24a648a48741b1ac809e47b9543c6f12,SHA256=078163d5c16f64caa5a14784323fd51451b8c831c73396b967b4e35e6879937b,IMPHASH=1193bc223dad681f22f8248608cbb592</Hashes>
+			</Rule>
+		</FileBlockExecutable>
 		<FileBlockExecutable onmatch="exclude">
 			<Rule groupRelation="and">
 				<User condition="end with">\Administrator</User>
 				<TargetFilename condition="begin with">C:\Tools\</TargetFilename>
 			</Rule>
 		</FileBlockExecutable>
-	</RuleGroup>
-
-	<RuleGroup name="Generic PE File Block" groupRelation="or">
-		<FileBlockExecutable onmatch="include">
-			<TargetFilename condition="begin with">C:\</TargetFilename>
+		<FileBlockExecutable onmatch="exclude">
+			<Image condition="is">C:\Program Files\Mozilla Firefox\updater.exe</Image>
+			<TargetFilename condition="begin with">C:\Program Files\Mozilla Firefox\</TargetFilename>
 		</FileBlockExecutable>
 		<FileBlockExecutable onmatch="exclude">
-			<Hashes condition="contains all">MD5=7663C565BF28115506CB7EBD1DA389E0,SHA256=D9C8FDFDCE510FD9922DA3A1084B6AC4476C1407D1D8BBB67FC0A61988552771,IMPHASH=A039666F8D08DD16E0909469DA998438</Hashes>
+			<Image condition="is">C:\Program Files\Mozilla Firefox\updater.exe</Image>
+			<TargetFilename condition="begin with">C:\Program Files (x86)\Mozilla Maintenance Service\</TargetFilename>
+		</FileBlockExecutable>
+		<FileBlockExecutable onmatch="exclude">
+			<Image condition="is">C:\Program Files\Mozilla Firefox\firefox.exe</Image>
+			<TargetFilename condition="begin with">C:\Users\*\AppData\Roaming\Mozilla\Firefox\Profiles\</TargetFilename>
+		</FileBlockExecutable>
+		<FileBlockExecutable onmatch="exclude">
+			<Rule groupRelation="and">
+				<Image condition="is">C:\Program Files\Mozilla Firefox\uninstall\helper.exe</Image>
+				<TargetFilename condition="begin with">C:\Windows\</TargetFilename>
+			</Rule>
 		</FileBlockExecutable>
 	</RuleGroup>
-
 	</EventFiltering>
 </Sysmon>
