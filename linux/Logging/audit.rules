@@ -1,148 +1,105 @@
-# audit_time_rules - Record attempts to alter time through adjtime
--a always,exit -F arch=b64 -S adjtimex -k audit_time_rules
+## Reset audit rules before applying (prevents duplicates)
+-D
 
-# audit_time_rules - Record attempts to alter time through settimeofday
--a always,exit -F arch=b64 -S settimeofday -k audit_time_rules
+## ========== SYSTEM SECURITY MONITORING ==========
+# Record all user authentication events (logins, failed logins, session activity)
+-w /var/log/faillog -p wa -k auth_log
+-w /var/log/lastlog -p wa -k auth_log
+-w /var/run/utmp -p wa -k auth_log
+-w /var/log/btmp -p wa -k auth_log
+-w /var/log/wtmp -p wa -k auth_log
 
-# audit_time_rules - Record Attempts to Alter Time Through stime
--a always,exit -F arch=b64 -S adjtimex -S settimeofday -S clock_settime
--k audit_time_rules
+# Monitor sudo commands & privilege escalation
+-w /etc/sudoers -p wa -k sudo_actions
+-w /var/log/sudo.log -p wa -k sudo_actions
 
-# audit_time_rules - Record Attempts to Alter Time Through clock_settime
--a always,exit -F arch=b64 -S clock_settime -k audit_time_rules
+# Monitor all modifications to user and group accounts
+-w /etc/passwd -p wa -k identity_change
+-w /etc/group -p wa -k identity_change
+-w /etc/shadow -p wa -k identity_change
+-w /etc/gshadow -p wa -k identity_change
+-w /etc/security/opasswd -p wa -k identity_change
 
-# Record Attempts to Alter the localtime File
--w /etc/localtime -p wa -k audit_time_rules
+## ========== CRITICAL SYSTEM FILE MONITORING ==========
+# Watch system binary modifications (Potential Red Team tampering)
+-w /bin/ -p wa -k bin_mod
+-w /sbin/ -p wa -k bin_mod
+-w /usr/bin/ -p wa -k bin_mod
+-w /usr/sbin/ -p wa -k bin_mod
 
-# Record Events that Modify User/Group Information
-# audit_account_changes
--w /etc/group -p wa -k audit_account_changes
--w /etc/passwd -p wa -k audit_account_changes
--w /etc/gshadow -p wa -k audit_account_changes
--w /etc/shadow -p wa -k audit_account_changes
--w /etc/security/opasswd -p wa -k audit_account_changes
+# Watch system-wide config files (Red Team persistence techniques)
+-w /etc/ -p wa -k config_mod
 
-# Record Events that Modify the System's Network Environment
-# audit_network_modifications
--a always,exit -F arch=ARCH -S sethostname -S setdomainname -k audit_network_modifications
--w /etc/issue -p wa -k audit_network_modifications
--w /etc/issue.net -p wa -k audit_network_modifications
--w /etc/hosts -p wa -k audit_network_modifications
--w /etc/sysconfig/network -p wa -k audit_network_modifications
+# Watch service configurations and changes (Detect persistence/backdoors)
+-w /etc/systemd/ -p wa -k service_mod
+-w /lib/systemd/system/ -p wa -k service_mod
 
-#Record Events that Modify the System's Mandatory Access Controls
--w /etc/selinux/ -p wa -k MAC-policy
+# Watch kernel module loading/unloading (Detect rootkits)
+-w /sbin/insmod -p x -k kernel_mod
+-w /sbin/rmmod -p x -k kernel_mod
+-w /sbin/modprobe -p x -k kernel_mod
+-a always,exit -F arch=b64 -S init_module -S delete_module -k kernel_mod
 
-#Record Events that Modify the System's Discretionary Access Controls - chmod
--a always,exit -F arch=b32 -S chmod -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S chmod  -F auid>=500 -F auid!=4294967295 -k perm_mod
+## ========== TRACKING RED TEAM SERVICE DISRUPTION ATTEMPTS ==========
+# Detect changes to service/network config files
+-w /etc/network/ -p wa -k net_mod
+-w /etc/resolv.conf -p wa -k dns_mod
+-w /etc/hosts -p wa -k dns_mod
+-w /etc/sysconfig/network -p wa -k net_mod
 
-#Record Events that Modify the System's Discretionary Access Controls - chown
--a always,exit -F arch=b32 -S chown -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S chown -F auid>=500 -F auid!=4294967295 -k perm_mod
+# Detect system shutdown or reboot attempts
+-a always,exit -F arch=b64 -S reboot -S shutdown -k system_down
 
-#Record Events that Modify the System's Discretionary Access Controls - fchmod
--a always,exit -F arch=b32 -S fchmod -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S fchmod -F auid>=500 -F auid!=4294967295 -k perm_mod
+# Detect firewall changes (Red Team disabling protection)
+-w /etc/iptables/ -p wa -k firewall_mod
+-w /etc/nftables.conf -p wa -k firewall_mod
 
-#Record Events that Modify the System's Discretionary Access Controls - fchmodat
--a always,exit -F arch=b32 -S fchmodat -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S fchmodat -F auid>=500 -F auid!=4294967295 -k perm_mod
+## ========== TRACK PRIVILEGE ESCALATION ==========
+# Detect changes to setuid/setgid binaries (Privilege escalation risk)
+-a always,exit -F arch=b64 -S chmod -F auid>=1000 -F perm=x -k priv_escalation
+-a always,exit -F arch=b64 -S fchmod -F auid>=1000 -F perm=x -k priv_escalation
+-a always,exit -F arch=b64 -S fchmodat -F auid>=1000 -F perm=x -k priv_escalation
+-a always,exit -F arch=b64 -S setxattr -F auid>=1000 -k priv_escalation
+-a always,exit -F arch=b64 -S removexattr -F auid>=1000 -k priv_escalation
 
-#Record Events that Modify the System's Discretionary Access Controls - fchown
--a always,exit -F arch=b32 -S fchown -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S fchown -F auid>=500 -F auid!=4294967295 -k perm_mod
+# Detect execution of sensitive commands (Enumeration & Persistence)
+-a always,exit -F arch=b64 -S execve -F path=/bin/su -F perm=x -k priv_escalation
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/sudo -F perm=x -k priv_escalation
 
-#Record Events that Modify the System's Discretionary Access Controls - fchownat
--a always,exit -F arch=b32 -S fchownat -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S fchownat -F auid>=500 -F auid!=4294967295 -k perm_mod
+## ========== DETECT FILE DELETION & STEALTH ACTIONS ==========
+# Watch for file deletions (Red Team covering tracks)
+-a always,exit -F arch=b64 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F exit=-EACCES -k file_del
 
-#Record Events that Modify the System's Discretionary Access Controls - fremovexattr
--a always,exit -F arch=b32 -S fremovexattr -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S fremovexattr -F auid>=500 -F auid!=4294967295 -k perm_mod
+# Detect creation of hidden files & directories (Red Team dropping tools)
+-a always,exit -F arch=b64 -S mkdir -F dir=/root/.ssh -F success=1 -k hidden_files
+-a always,exit -F arch=b64 -S open -F path=/root/.bash_history -F success=0 -k hidden_files
 
-#Record Events that Modify the System's Discretionary Access Controls - fsetxattr
--a always,exit -F arch=b32 -S fsetxattr -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S fsetxattr -F auid>=500 -F auid!=4294967295 -k perm_mod
+## ========== MONITORING SUSPICIOUS NETWORK ACTIVITY ==========
+# Detect packet sniffing attempts
+-a always,exit -F arch=b64 -S socket -S bind -S connect -F auid>=1000 -k net_sniff
 
-#Record Events that Modify the System's Discretionary Access Controls - lchown
--a always,exit -F arch=b32 -S lchown -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S lchown -F auid>=500 -F auid!=4294967295 -k perm_mod
+# Detect unusual listening services (Persistence Backdoors)
+-a always,exit -F arch=b64 -S listen -F success=1 -k backdoor_listener
 
-#Record Events that Modify the System's Discretionary Access Controls - lremovexattr
--a always,exit -F arch=b32 -S lremovexattr -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S lremovexattr -F auid>=500 -F auid!=4294967295 -k perm_mod
+## ========== DETECT CHANGES TO TIME CONFIGURATION ==========
+# Record attempts to alter system time
+-a always,exit -F arch=b64 -S adjtimex -S settimeofday -S clock_settime -k time_mod
+-w /etc/localtime -p wa -k time_mod
 
-#Record Events that Modify the System's Discretionary Access Controls - lsetxattr
--a always,exit -F arch=b32 -S lsetxattr -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S lsetxattr -F auid>=500 -F auid!=4294967295 -k perm_mod
+## ========== AUDIT LOG TAMPERING PROTECTION ==========
+# Watch for changes to audit logs
+-w /var/log/audit/ -p wa -k audit_log_mod
+-w /etc/audit/ -p wa -k audit_log_mod
+-w /etc/audit/audit.rules -p wa -k audit_log_mod
 
-#Record Events that Modify the System's Discretionary Access Controls - removexattr
--a always,exit -F arch=b32 -S removexattr -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S removexattr -F auid>=500 -F auid!=4294967295 -k perm_mod-a always,exit -F arch=b32 -S fchmodat -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S fchmodat -F auid>=500 -F auid!=4294967295 -k perm_mod
+## ========== RED TEAM DETECTION - COMMON ENUMERATION TECHNIQUES ==========
+# Detect use of enumeration commands
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/id -F success=1 -k recon
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/whoami -F success=1 -k recon
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/groups -F success=1 -k recon
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/hostname -F success=1 -k recon
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/netstat -F success=1 -k recon
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/ss -F success=1 -k recon
 
-#Record Events that Modify the System's Discretionary Access Controls - fchown
--a always,exit -F arch=b32 -S fchown -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S fchown -F auid>=500 -F auid!=4294967295 -k perm_mod
-
-#Record Events that Modify the System's Discretionary Access Controls - fchownat
--a always,exit -F arch=b32 -S fchownat -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S fchownat -F auid>=500 -F auid!=4294967295 -k perm_mod
-
-#Record Events that Modify the System's Discretionary Access Controls - fremovexattr
--a always,exit -F arch=b32 -S fremovexattr -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S fremovexattr -F auid>=500 -F auid!=4294967295 -k perm_mod
-
-#Record Events that Modify the System's Discretionary Access Controls - fsetxattr
--a always,exit -F arch=b32 -S lsetxattr -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S lsetxattr -F auid>=500 -F auid!=4294967295 -k perm_mod
-
-#Record Events that Modify the System's Discretionary Access Controls - removexattr
--a always,exit -F arch=b32 -S removexattr -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S removexattr -F auid>=500 -F auid!=4294967295 -k perm_mod
-
-#Record Events that Modify the System's Discretionary Access Controls - setxattr
--a always,exit -F arch=b32 -S setxattr -F auid>=500 -F auid!=4294967295 -k perm_mod
--a always,exit -F arch=b64 -S setxattr -F auid>=500 -F auid!=4294967295 -k perm_mod
-
-#Record Attempts to Alter Logon and Logout Events
--w /var/log/faillog -p wa -k logins
--w /var/log/lastlog -p wa -k logins
-
-#Record Attempts to Alter Process and Session Initiation Information
--w /var/run/utmp -p wa -k session
--w /var/log/btmp -p wa -k session
--w /var/log/wtmp -p wa -k session
-
-#Ensure auditd Collects Unauthorized Access Attempts to Files (unsuccessful)
--a always,exit -F arch=b32 -S creat -S open -S openat -S open_by_handle_at -S truncate -S ftruncate -F exit=-EACCES -F auid>=500 -F auid!=4294967295 -k access
--a always,exit -F arch=b32 -S creat -S open -S openat -S open_by_handle_at -S truncate -S ftruncate -F exit=-EPERM -F auid>=500 -F auid!=4294967295 -k access
--a always,exit -F arch=b64 -S creat -S open -S openat -S open_by_handle_at -S truncate -S ftruncate -F exit=-EACCES -F auid>=500 -F auid!=4294967295 -k access
--a always,exit -F arch=b64 -S creat -S open -S openat -S open_by_handle_at -S truncate -S ftruncate -F exit=-EPERM -F auid>=500 -F auid!=4294967295 -k access
-
-#Ensure auditd Collects Information on the Use of Privileged Commands
-#
-#  Find setuid / setgid programs then modify and uncomment the line below.
-#
-##  sudo find / -xdev -type f -perm -4000 -o -perm -2000 2>/dev/null
-#
-# -a always,exit -F path=SETUID_PROG_PATH -F perm=x -F auid>=500 -F auid!=4294967295 -k privileged
-
-#Ensure auditd Collects Information on Exporting to Media (successful)
--a always,exit -F arch=ARCH -S mount -F auid>=500 -F auid!=4294967295 -k export
-
-#Ensure auditd Collects File Deletion Events by User
--a always,exit -F arch=ARCH -S rmdir -S unlink -S unlinkat -S rename -S renameat -F auid>=500 -F auid!=4294967295 -k delete
-
-#Ensure auditd Collects System Administrator Actions
--w /etc/sudoers -p wa -k actions
-
-#Ensure auditd Collects Information on Kernel Module Loading and Unloading
--w /sbin/insmod -p x -k modules
--w /sbin/rmmod -p x -k modules
--w /sbin/modprobe -p x -k modules
--a always,exit -F arch=b64 -S init_module -S delete_module -k modules
-
-#Make the auditd Configuration Immutable
+## ========== MAKE AUDIT LOGS IMMUTABLE (ROOT CANNOT DELETE LOGS) ==========
 -e 2
