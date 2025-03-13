@@ -236,15 +236,48 @@ function Enumerate {
     Clear-History
     try {
         rm $(Get-PSReadLineOption).HistorySavePath -ErrorAction Stop
+        Write-Host "[+] Cleared powershell history!" -ForegroundColor Green
     } catch {
         Write-Host "[-] No powershell history file found!" -ForegroundColor Yellow
     }
-    Write-Host "[+] Cleared powershell history!" -ForegroundColor Green
-
-    Write-Host "[+] Remember to delete unnecessary local administrators!" -ForegroundColor Yellow
-    Write-Host "[+] Finished machine enumeration" -ForegroundColor Green
+    
+    Write-Host "[+] Finished machine enumeration!`n" -ForegroundColor Green
+    Write-Host "Things to do:`n* Delete unnecessary local administrators!" -ForegroundColor Yellow
 }
 
+function svcstuff {
+    # Get the domain name automatically
+    $domain = $env:USERDOMAIN
+    $username = "$domain\Guest"
+
+    # Prompt for password input for the Guest account
+    $password = Read-Host -AsSecureString "Enter the password for the $username account"
+
+    # Convert the secure password to plain text for WMI interaction
+    $passwordPlainText = [System.Net.NetworkCredential]::new('', $password).Password
+
+    # Prompt for the service name
+    $serviceName = Read-Host "Enter the service name to manage"
+
+    # Use WMI to get the service object
+    $service = Get-WmiObject -Class Win32_Service -Filter "Name = '$serviceName'"
+
+    if ($service) {
+        # Change the service credentials using WMI
+        $service.change($null, $null, $null, $null, $null, $null, $username, $passwordPlainText)
+
+        # Restart the service
+        Restart-Service -Name $serviceName # this will fail if u put random creds and its ok
+
+        # Disable the service
+        Set-Service -Name $serviceName -StartupType Disabled
+        Stop-Service -Name $serviceName
+
+        Write-Host "$serviceName has been restarted and disabled using the Guest account."
+    } else {
+        Write-Host "Service $serviceName not found."
+    }
+} 
 
 function Phase2 {
     Write-Output "Starting Phase 2!"
@@ -318,7 +351,8 @@ function Phase2 {
     New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPL" -Value 1
     New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "RunAsPPLBoot" -Value 1
 
-    Write-Host "[!] Finished Phase2!! Begin firewall rules!" -ForegroundColor Yellow
+    Write-Host "[!] Finished Phase2!!`n" -ForegroundColor Green
+    Write-Host "Things to do:`n* Run 'svcstuff'`n* Begin firewall rules!" -ForegroundColor Yellow
 }
 
 function Generate-WDAC {
