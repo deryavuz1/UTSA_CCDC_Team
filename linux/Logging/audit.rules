@@ -11,7 +11,7 @@
 
 # Monitor sudo commands & privilege escalation
 -w /etc/sudoers -p wa -k sudo_actions
--w /var/log/sudo.log -p wa -k sudo_actions
+-w /var/log/auth.log -p wa -k sudo_actions
 
 # Monitor all modifications to user and group accounts
 -w /etc/passwd -p wa -k identity_change
@@ -41,11 +41,11 @@
 -a always,exit -F arch=b64 -S init_module -S delete_module -k kernel_mod
 
 ## ========== TRACKING RED TEAM SERVICE DISRUPTION ATTEMPTS ==========
-# Detect changes to service/network config files
--w /etc/network/ -p wa -k net_mod
+# Detect changes to service/network config files (Ubuntu paths)
+-w /etc/network/interfaces -p wa -k net_mod
+-w /etc/netplan/ -p wa -k net_mod
 -w /etc/resolv.conf -p wa -k dns_mod
 -w /etc/hosts -p wa -k dns_mod
--w /etc/sysconfig/network -p wa -k net_mod
 
 # Detect system shutdown or reboot attempts
 -a always,exit -F arch=b64 -S reboot -S shutdown -k system_down
@@ -53,6 +53,7 @@
 # Detect firewall changes (Red Team disabling protection)
 -w /etc/iptables/ -p wa -k firewall_mod
 -w /etc/nftables.conf -p wa -k firewall_mod
+-w /etc/ufw/ -p wa -k firewall_mod
 
 ## ========== TRACK PRIVILEGE ESCALATION ==========
 # Detect changes to setuid/setgid binaries (Privilege escalation risk)
