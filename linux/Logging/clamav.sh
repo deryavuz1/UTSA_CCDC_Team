@@ -15,7 +15,7 @@ elif command -v dnf &> /dev/null; then
 elif command -v zypper &> /dev/null; then
     PKG_MGR="zypper"
 else
-    echo "[-] No supported package manager found (APT, YUM, DNF, Zypper). Exiting."
+    echo "[-] No supported package manager found (APT, YUM, DNF, Zypper). what is u doin."
     exit 1
 fi
 
@@ -28,15 +28,12 @@ elif [[ $PKG_MGR == "zypper" ]]; then
     zypper install -y clamav clamav-daemon
 fi
 
-# Stop ClamAV daemon before updating
 echo "[+] Stopping ClamAV daemon for updates..."
 systemctl stop clamav-freshclam || systemctl stop freshclam
 
-# Update ClamAV virus definitions
 echo "[+] Updating ClamAV virus definitions..."
 freshclam
 
-# Restart ClamAV daemon
 echo "[+] Starting ClamAV services..."
 systemctl start clamav-freshclam || systemctl start freshclam
 systemctl enable clamav-freshclam || systemctl enable freshclam
@@ -45,7 +42,6 @@ echo "[+] Enabling ClamAV on boot..."
 systemctl enable clamav-daemon
 systemctl start clamav-daemon
 
-# Create ClamAV scanning script
 SCAN_SCRIPT="/usr/local/bin/clamav_scan.sh"
 
 cat <<EOF > $SCAN_SCRIPT
@@ -62,14 +58,12 @@ chmod 700 $SCAN_SCRIPT
 chown root:root $SCAN_SCRIPT
 chattr +i $SCAN_SCRIPT  # **Make the script immutable**
 
-# Secure the ClamAV log file
 LOG_FILE="/var/log/clamav_scan.log"
 touch $LOG_FILE
 chmod 600 $LOG_FILE
 chown root:root $LOG_FILE
 chattr +a $LOG_FILE  # **Append-only mode for security**
 
-# Create a systemd service for ClamAV scans
 SYSTEMD_SERVICE="/etc/systemd/system/clamav-scan.service"
 
 cat <<EOF > $SYSTEMD_SERVICE
@@ -96,7 +90,6 @@ EOF
 chmod 644 $SYSTEMD_SERVICE
 chown root:root $SYSTEMD_SERVICE
 
-# Create a systemd timer to run the scan every 10 minutes
 SYSTEMD_TIMER="/etc/systemd/system/clamav-scan.timer"
 
 cat <<EOF > $SYSTEMD_TIMER
@@ -115,10 +108,8 @@ EOF
 chmod 644 $SYSTEMD_TIMER
 chown root:root $SYSTEMD_TIMER
 
-# Reload systemd to apply changes
 systemctl daemon-reload
 
-# Enable and start the systemd timer
 systemctl enable clamav-scan.timer
 systemctl start clamav-scan.timer
 
