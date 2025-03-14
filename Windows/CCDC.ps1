@@ -64,7 +64,6 @@ function Get-Tools {
     Rename-Item -Path "C:\Tools\Sysmon\Sysmon.exe" -NewName "StorageSyncSvc.exe" > $null
     C:\Tools\Sysmon\StorageSyncSvc.exe -i -accepteula -d storagesync > $null
     Write-Host "[+] Installed Sysmon"
-    Set-Service -Name StorageSyncSvc -Description "Provides synchronization and caching capabilities for local and network storage devices."
     $acl = Get-ACL "C:\Windows\StorageSyncSvc.exe"
     $acl.SetAccessRuleProtection($True, $False)
     Set-ACL "C:\Windows\StorageSyncSvc.exe" $acl | Out-Null
@@ -83,7 +82,7 @@ function Get-Tools {
 
 function Enumerate {
     param (
-        [System.Security.SecureString]$AdminPass
+        [string]$AdminPass
     )
     Write-Host "[+] Start Windows Updates and Defender Protection Updates!!" -ForegroundColor Blue
     Write-Output "=========START SYSTEM INFO========="
@@ -127,7 +126,7 @@ function Enumerate {
     if ($AdminPass) {
         Enable-LocalUser Administrator
         Write-Host "[+] Enabled local administrator" -ForegroundColor Green
-        Set-LocalUser -Name Administrator -Password $AdminPass
+        Set-LocalUser -Name Administrator -Password (ConvertTo-SecureString $AdminPass -AsPlainText -Force)
         Write-Host "[+] Changed Administrator password!" -ForegroundColor Green
     } else {
         Write-Host "[-] Nothing was given for new Administrator password - skipping" -ForegroundColor Yellow
@@ -252,7 +251,7 @@ function Enumerate {
     Write-Host "Things to do:`n* Delete unnecessary local administrators!" -ForegroundColor Yellow
 }
 
-function svcstuff {
+function Guest-Service {
     # Get the domain name automatically
     $domain = $env:USERDOMAIN
     $username = "$domain\Guest"
@@ -271,14 +270,14 @@ function svcstuff {
 
     if ($service) {
         # Change the service credentials using WMI
-        $service.change($null, $null, $null, $null, $null, $null, $username, $passwordPlainText)
+        $service.change($null, $null, $null, $null, $null, $null, $username, $passwordPlainText) > $null
 
         # Restart the service
-        Restart-Service -Name $serviceName # this will fail if u put random creds and its ok
+        Restart-Service -Name $serviceName -Force # this will fail if u put random creds and its ok
 
         # Disable the service
         Set-Service -Name $serviceName -StartupType Disabled
-        Stop-Service -Name $serviceName
+        Stop-Service -Name $serviceName -Force
 
         Write-Host "$serviceName has been restarted and disabled using the Guest account."
     } else {
@@ -451,6 +450,23 @@ function Get-GroupMembersRecursive {
 
     $GroupMembers = Get-ADGroupMember -Identity $GroupName -Recursive | Where-Object { $_.objectClass -eq "user" }
     return $GroupMembers
+}
+
+Function Add-UsersToGroup {
+    param (
+        [string]$Source,
+        [string]$Destination
+    )
+    $Users = Get-GroupMembersRecursive -GroupName $Source
+    foreach ($User in $Users) {
+        try {
+            Add-ADGroupMember -Identity $Destination -Members $User
+            Write-Host "[+] Added user $User to $Destination" -ForegroundColor Green
+        } catch {
+            Write-Host "[-] Skill issue for user $User" -ForegroundColor Red
+        }
+        
+    }
 }
 
 Function Group-Passwords {
