@@ -1,0 +1,106 @@
+## Reset audit rules before applying (prevents duplicates)
+-D
+
+## ========== SYSTEM SECURITY MONITORING ==========
+# Record all user authentication events (logins, failed logins, session activity)
+-w /var/log/faillog -p wa -k auth_log
+-w /var/log/lastlog -p wa -k auth_log
+-w /var/run/utmp -p wa -k auth_log
+-w /var/log/btmp -p wa -k auth_log
+-w /var/log/wtmp -p wa -k auth_log
+
+# Monitor sudo commands & privilege escalation
+-w /etc/sudoers -p wa -k sudo_actions
+-w /var/log/auth.log -p wa -k sudo_actions
+
+# Monitor all modifications to user and group accounts
+-w /etc/passwd -p wa -k identity_change
+-w /etc/group -p wa -k identity_change
+-w /etc/shadow -p wa -k identity_change
+-w /etc/gshadow -p wa -k identity_change
+-w /etc/security/opasswd -p wa -k identity_change
+
+## ========== CRITICAL SYSTEM FILE MONITORING ==========
+# Watch system binary modifications (Potential Red Team tampering)
+-w /bin/ -p wa -k bin_mod
+-w /sbin/ -p wa -k bin_mod
+-w /usr/bin/ -p wa -k bin_mod
+-w /usr/sbin/ -p wa -k bin_mod
+
+# Watch system-wide config files (Red Team persistence techniques)
+-w /etc/ -p wa -k config_mod
+
+# Watch service configurations and changes (Detect persistence/backdoors)
+-w /etc/systemd/ -p wa -k service_mod
+-w /lib/systemd/system/ -p wa -k service_mod
+
+# Watch kernel module loading/unloading (Detect rootkits)
+-w /sbin/insmod -p x -k kernel_mod
+-w /sbin/rmmod -p x -k kernel_mod
+-w /sbin/modprobe -p x -k kernel_mod
+-a always,exit -F arch=b64 -S init_module -S delete_module -k kernel_mod
+
+## ========== TRACKING RED TEAM SERVICE DISRUPTION ATTEMPTS ==========
+# Detect changes to service/network config files (Ubuntu paths)
+-w /etc/network/interfaces -p wa -k net_mod
+-w /etc/netplan/ -p wa -k net_mod
+-w /etc/resolv.conf -p wa -k dns_mod
+-w /etc/hosts -p wa -k dns_mod
+
+# Detect system shutdown or reboot attempts
+-a always,exit -F arch=b64 -S reboot -S shutdown -k system_down
+
+# Detect firewall changes (Red Team disabling protection)
+-w /etc/iptables/ -p wa -k firewall_mod
+-w /etc/nftables.conf -p wa -k firewall_mod
+-w /etc/ufw/ -p wa -k firewall_mod
+
+## ========== TRACK PRIVILEGE ESCALATION ==========
+# Detect changes to setuid/setgid binaries (Privilege escalation risk)
+-a always,exit -F arch=b64 -S chmod -F auid>=1000 -F perm=x -k priv_escalation
+-a always,exit -F arch=b64 -S fchmod -F auid>=1000 -F perm=x -k priv_escalation
+-a always,exit -F arch=b64 -S fchmodat -F auid>=1000 -F perm=x -k priv_escalation
+-a always,exit -F arch=b64 -S setxattr -F auid>=1000 -k priv_escalation
+-a always,exit -F arch=b64 -S removexattr -F auid>=1000 -k priv_escalation
+
+# Detect execution of sensitive commands (Enumeration & Persistence)
+-a always,exit -F arch=b64 -S execve -F path=/bin/su -F perm=x -k priv_escalation
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/sudo -F perm=x -k priv_escalation
+
+## ========== DETECT FILE DELETION & STEALTH ACTIONS ==========
+# Watch for file deletions (Red Team covering tracks)
+-a always,exit -F arch=b64 -S unlink -S unlinkat -S rename -S renameat -F auid>=1000 -F exit=-EACCES -k file_del
+
+# Detect creation of hidden files & directories (Red Team dropping tools)
+-a always,exit -F arch=b64 -S mkdir -F dir=/root/.ssh -F success=1 -k hidden_files
+-a always,exit -F arch=b64 -S open -F path=/root/.bash_history -F success=0 -k hidden_files
+
+## ========== MONITORING SUSPICIOUS NETWORK ACTIVITY ==========
+# Detect packet sniffing attempts
+-a always,exit -F arch=b64 -S socket -S bind -S connect -F auid>=1000 -k net_sniff
+
+# Detect unusual listening services (Persistence Backdoors)
+-a always,exit -F arch=b64 -S listen -F success=1 -k backdoor_listener
+
+## ========== DETECT CHANGES TO TIME CONFIGURATION ==========
+# Record attempts to alter system time
+-a always,exit -F arch=b64 -S adjtimex -S settimeofday -S clock_settime -k time_mod
+-w /etc/localtime -p wa -k time_mod
+
+## ========== AUDIT LOG TAMPERING PROTECTION ==========
+# Watch for changes to audit logs
+-w /var/log/audit/ -p wa -k audit_log_mod
+-w /etc/audit/ -p wa -k audit_log_mod
+-w /etc/audit/audit.rules -p wa -k audit_log_mod
+
+## ========== RED TEAM DETECTION - COMMON ENUMERATION TECHNIQUES ==========
+# Detect use of enumeration commands
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/id -F success=1 -k recon
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/whoami -F success=1 -k recon
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/groups -F success=1 -k recon
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/hostname -F success=1 -k recon
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/netstat -F success=1 -k recon
+-a always,exit -F arch=b64 -S execve -F path=/usr/bin/ss -F success=1 -k recon
+
+## ========== MAKE AUDIT LOGS IMMUTABLE (ROOT CANNOT DELETE LOGS) ==========
+-e 2

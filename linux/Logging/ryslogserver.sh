@@ -7,6 +7,7 @@ fi
 
 AUDIT_RULES_PATH="/mnt/data/audit.rules"
 DEST_AUDIT_RULES="/etc/audit/rules.d/audit.rules"
+HOSTNAME=$(hostname)  # Dynamically get the machine's hostname
 
 echo "[+] Detecting package manager..."
 if command -v apt &> /dev/null; then
@@ -30,7 +31,14 @@ elif [[ $PKG_MGR == "zypper" ]]; then
     zypper install -y rsyslog audit audit-audisp
 fi
 
-# Backup original config
+# Ensure remote logging directory exists and has correct permissions
+LOG_DIR="/var/log/remote/$HOSTNAME"
+echo "[+] Creating remote log directory: $LOG_DIR"
+mkdir -p "$LOG_DIR"
+chmod -R 755 /var/log/remote
+chown -R syslog:adm /var/log/remote
+
+# Backup original rsyslog config
 cp /etc/rsyslog.conf /etc/rsyslog.conf.bak
 
 # Enable UDP logging in rsyslog.conf
@@ -45,9 +53,6 @@ template(name="RemoteLogs" type="string" string="/var/log/remote/%HOSTNAME%/%PRO
 *.* ?RemoteLogs
 & stop
 EOF
-
-mkdir -p /var/log/remote
-chmod 755 /var/log/remote
 
 cat <<EOF > /etc/logrotate.d/rsyslog-remote
 /var/log/remote/*/*.log {
