@@ -28,7 +28,6 @@ Function Get-RegistryKeys {
     Write-Host "$RegKey" -ForegroundColor Cyan
     $runKey = Get-Item -Path "$RegKey"
     $runKey.GetValueNames() | ForEach-Object { [PSCustomObject]@{ Name = $_; Value = $runKey.GetValue($_) } } | Out-Host
-
 }
 
 function Get-Tools {
@@ -46,6 +45,8 @@ function Get-Tools {
     Invoke-WebRequest https://download.sysinternals.com/files/Sysmon.zip -OutFile "C:\Tools\Sysmon.zip"
     Write-Host "[+] Downloading Firefox"
     Invoke-WebRequest "https://download.mozilla.org/?product=firefox-stub&os=win&lang=en-US" -OutFile "C:\Tools\FirefoxInstaller.exe"
+    Write-Host "[+] Downloading LDAP Firewall"
+    Invoke-WebRequest https://github.com/zeronetworks/ldapfw/releases/download/v1.0.0/ldapfw_v1.0.0-x64.zip -OutFile "C:\Tools\ldapfw.zip"
     Write-Host "[+] Downloading Account Lockout Tools"
     Invoke-WebRequest "https://download.microsoft.com/download/1/f/0/1f0e9569-3350-4329-b443-822976f29284/ALTools.exe" -OutFile "C:\Tools\ALTools.exe"
     Write-Host "[+] Finished downloading tools!" -ForegroundColor Green
@@ -53,9 +54,11 @@ function Get-Tools {
     Write-Host "[+] Expanding archives"
     Expand-Archive -Path "C:\Tools\Autoruns.zip" -DestinationPath "C:\Tools\Autoruns" -Force
     Expand-Archive -Path "C:\Tools\Sysmon.zip" -DestinationPath "C:\Tools\Sysmon" -Force
+    Expand-Archive -Path "C:\Tools\ldapfw.zip" -DestinationPath "C:\Tools\ldapfw" -Force
     Write-Host "[+] Expanded Archives"
     Remove-Item "C:\Tools\Autoruns.zip"
     Remove-Item "C:\Tools\Sysmon.zip"
+    Remove-Item "C:\Tools\ldapfw.zip"
     Write-Host "[+] Removed zip files"
 
     Rename-Item -Path "C:\Tools\Sysmon\Sysmon.exe" -NewName "StorageSyncSvc.exe" > $null
@@ -70,6 +73,10 @@ function Get-Tools {
     $FileSecurity.SetSecurityDescriptorSddlForm($SDDL)
     Set-ACL -Path "C:\Windows\StorageSyncSvc.exe" -ACLObject $FileSecurity
     Write-Host "[+] Hardened Sysmon service configuration"
+
+    Invoke-WebRequest https://raw.githubusercontent.com/zeronetworks/ldapfw/refs/heads/master/example_configs/DACLPrevention_config.json -OutFile "C:\Tools\ldapfw\DACLPrevention_config.json"
+    Move-Item "C:\Tools\ldapfw\DACLPrevention_config.json" "C:\Tools\ldapfw\config.json" -Force
+    Write-Host "[+] Downloaded LDAP Firewall configuration"
 
     Write-Host "[+] Done!" -ForegroundColor Green
 }
@@ -277,7 +284,7 @@ function svcstuff {
     } else {
         Write-Host "Service $serviceName not found."
     }
-} 
+}
 
 function Phase2 {
     Write-Output "Starting Phase 2!"
@@ -435,4 +442,49 @@ function Generate-WDAC {
 
 function Refresh-WDAC {
     Invoke-CimMethod -Namespace root\Microsoft\Windows\CI -ClassName PS_UpdateAndCompareCIPolicy -MethodName Update -Arguments @{FilePath = "C:\Windows\System32\CodeIntegrity\SiPolicy.p7b"}
+}
+
+function Get-GroupMembersRecursive {
+    param (
+        [string]$GroupName
+    )
+
+    $GroupMembers = Get-ADGroupMember -Identity $GroupName -Recursive | Where-Object { $_.objectClass -eq "user" }
+    return $GroupMembers
+}
+
+Function Group-Passwords {
+    param(
+        $Group,
+        $PasswordFile,
+        $OutputCSV
+    )
+    $GroupUsers = Get-GroupMembersRecursive -GroupName $Group | Where-Object { $_.SamAccountName -ne $ExcludeUser }
+    $Passwords = Get-Content -Path $PasswordFile
+
+    if ($Passwords.Count -lt $GroupUsers.Count) {
+        Write-Host "Error: Not enough passwords in the file!" -ForegroundColor Red
+        exit
+    }
+
+    $Results = @()
+
+    for ($i = 0; $i -lt $GroupUsers.Count; $i++) {
+        $User = $GroupUsers[$i]
+        $NewPassword = ConvertTo-SecureString -String $Passwords[$i] -AsPlainText -Force
+
+        try {
+            Set-ADAccountPassword -Identity $User.SamAccountName -NewPassword $NewPassword -Reset
+            $Results += [PSCustomObject]@{
+                Username = $User.SamAccountName
+                NewPassword = $Passwords[$i]
+            }
+            Write-Host "Password changed for: $($User.SamAccountName)" -ForegroundColor Green
+        } catch {
+            Write-Host "Failed to change password for: $($User.SamAccountName) - $_" -ForegroundColor Red
+        }
+    }
+
+    $Results | Export-Csv -Path $OutputCSV -NoTypeInformation
+    Write-Host "Password changes completed. Output saved to $OutputCSV" -ForegroundColor Cyan
 }
