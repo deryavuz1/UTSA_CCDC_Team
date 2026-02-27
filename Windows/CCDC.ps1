@@ -29,16 +29,19 @@ Function Get-RegistryKeys {
     $runKey = Get-Item -Path "$RegKey"
     $runKey.GetValueNames() | ForEach-Object { [PSCustomObject]@{ Name = $_; Value = $runKey.GetValue($_) } } | Out-Host
 }
-function Get-PingCastle {
+function Get-Cable {
     Invoke-WebRequest "https://go.microsoft.com/fwlink/?linkid=874338" -outfile "C:\Tools\dotnet472.exe"
     C:\Tools\dotnet472.exe /quiet /norestart
     Invoke-WebRequest "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.103/dotnet-sdk-10.0.103-win-x64.exe" -outfile "C:\Tools\dotnet10.exe"
     C:\Tools\dotnet10.exe /quiet /norestart
-    Invoke-WebRequest "https://github.com/netwrix/pingcastle/releases/download/3.5.0.37/PingCastle_3.5.0.37.zip" -outfile "C:\Tools\pingcastle.zip"
-    Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force
     Write-Host "[+] Downloading Cable"
     Invoke-WebRequest "https://github.com/logangoins/Cable/releases/download/1.0/Cable.exe -OutFile" "C:\Tools\Cable.exe"
 
+}
+
+function Get-PingCastle {
+Invoke-WebRequest "https://github.com/netwrix/pingcastle/releases/download/3.5.0.37/PingCastle_3.5.0.37.zip" -outfile "C:\Tools\pingcastle.zip"
+    Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force
 }
 
 function Get-Tools {
