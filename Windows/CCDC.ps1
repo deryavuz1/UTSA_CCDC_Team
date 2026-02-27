@@ -38,7 +38,86 @@ function Get-Cable {
     Invoke-WebRequest "https://github.com/logangoins/Cable/releases/download/1.0/Cable.exe -OutFile" "C:\Tools\Cable.exe"
 
 }
+function Reset-AllUserPasswords {
 
+    # Requires the ActiveDirectory module
+    Import-Module ActiveDirectory -ErrorAction Stop
+
+    # Generate a random alphanumeric password of specified length
+    function New-RandomPassword {
+        param([int]$Length = 16)
+        $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+        $password = -join ((1..$Length) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
+        return $password
+    }
+
+    # Define accounts to exclude
+    $excludedUsers = @('Administrator', 'krgbt')
+
+    Write-Host "Querying Active Directory for all enabled user accounts..." -ForegroundColor Cyan
+
+    # Pull all enabled users, excluding the protected accounts
+    $users = Get-ADUser -Filter { Enabled -eq $true } -Properties SamAccountName |
+             Where-Object { $excludedUsers -notcontains $_.SamAccountName }
+
+    if (-not $users) {
+        Write-Warning "No eligible users found. Exiting."
+        return
+    }
+
+    Write-Host "Found $($users.Count) user(s) to process." -ForegroundColor Cyan
+
+    # Build the password list, ensuring uniqueness
+    $passwordList = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $usedPasswords = [System.Collections.Generic.HashSet[string]]::new()
+
+    foreach ($user in $users) {
+        do {
+            $newPassword = New-RandomPassword -Length 16
+        } while (-not $usedPasswords.Add($newPassword))  # .Add() returns $false if already present
+
+        $passwordList.Add([PSCustomObject]@{
+            Username = $user.SamAccountName
+            Password = $newPassword
+        })
+    }
+
+    # Save CSV to the current user's desktop
+    $desktopPath = [Environment]::GetFolderPath('Desktop')
+    $csvPath = Join-Path $desktopPath "NewPasswords_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+
+    $passwordList | Export-Csv -Path $csvPath -NoTypeInformation
+
+    Write-Host "`nPassword list saved to: $csvPath" -ForegroundColor Green
+    Write-Host "Please open and review the file before proceeding." -ForegroundColor Yellow
+    Write-Host "`nThe following $($users.Count) account(s) will have their passwords changed:" -ForegroundColor Yellow
+    $passwordList | Format-Table -AutoSize
+
+    Write-Host "Press ENTER to begin changing passwords, or CTRL+C to abort..." -ForegroundColor Red
+    Read-Host | Out-Null
+
+    # Apply the new passwords
+    $successCount = 0
+    $failCount    = 0
+
+    foreach ($entry in $passwordList) {
+        try {
+            $securePassword = ConvertTo-SecureString $entry.Password -AsPlainText -Force
+            Set-ADAccountPassword -Identity $entry.Username -NewPassword $securePassword -Reset
+            # Optionally force a password change at next logon:
+            # Set-ADUser -Identity $entry.Username -ChangePasswordAtLogon $true
+            Write-Host "  [OK] $($entry.Username)" -ForegroundColor Green
+            $successCount++
+        }
+        catch {
+            Write-Warning "  [FAIL] $($entry.Username) - $($_.Exception.Message)"
+            $failCount++
+        }
+    }
+
+    Write-Host "`nDone. $successCount password(s) changed successfully, $failCount failure(s)." -ForegroundColor Cyan
+    Write-Host "Passwords are saved at: $csvPath" -ForegroundColor Green
+}
 function Get-PingCastle {
 Invoke-WebRequest "https://github.com/netwrix/pingcastle/releases/download/3.5.0.37/PingCastle_3.5.0.37.zip" -outfile "C:\Tools\pingcastle.zip"
     Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force
