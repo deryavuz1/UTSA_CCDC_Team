@@ -35,10 +35,9 @@ function Get-PingCastle {
     Invoke-WebRequest "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.103/dotnet-sdk-10.0.103-win-x64.exe" -outfile "C:\Tools\dotnet10.exe"
     C:\Tools\dotnet10.exe /quiet /norestart
     Invoke-WebRequest "https://github.com/netwrix/pingcastle/releases/download/3.5.0.37/PingCastle_3.5.0.37.zip" -outfile "C:\Tools\pingcastle.zip"
-    Expand-Archive "C:\Tools\pingcastle.zip"
-    C:\Tools\PingCastle_3.5.0.37\pingcastle.exe
+    Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force
     Write-Host "[+] Downloading Cable"
-    Invoke-WebRequest https://github.com/logangoins/Cable/releases/download/1.0/Cable.exe -OutFile "C:\Tools\Cable.exe"
+    Invoke-WebRequest "https://github.com/logangoins/Cable/releases/download/1.0/Cable.exe -OutFile" "C:\Tools\Cable.exe"
 
 }
 
@@ -52,22 +51,20 @@ function Get-Tools {
     Write-Host "[+] Downloading Autoruns"
     Invoke-WebRequest https://download.sysinternals.com/files/Autoruns.zip -OutFile "C:\Tools\Autoruns.zip"
     Write-Host "[+] Downloading Sysmon"
-    Invoke-WebRequest "https://get.microsoft.com/installer/download/9P7KNL5RWT25?hl=en-us&gl=us&referrer=storeforweb&ocid= -OutFile" "C:\Tools\sysinternals.exe"
+    Invoke-WebRequest https://download.sysinternals.com/files/Sysmon.zip -OutFile "C:\Tools\Sysmon.zip"
     Write-Host "[+] Downloading Firefox"
     Invoke-WebRequest "https://download.mozilla.org/?product=firefox-stub&os=win&lang=en-US" -OutFile "C:\Tools\FirefoxInstaller.exe"
     Write-Host "[+] Downloading LDAP Firewall"
     Invoke-WebRequest https://github.com/zeronetworks/ldapfw/releases/download/v1.0.0/ldapfw_v1.0.0-x64.zip -OutFile "C:\Tools\ldapfw.zip"
     Write-Host "[+] Downloading Account Lockout Tools"
     Invoke-WebRequest "https://download.microsoft.com/download/1/f/0/1f0e9569-3350-4329-b443-822976f29284/ALTools.exe" -OutFile "C:\Tools\ALTools.exe"
-    
+    Invoke-WebRequest "https://github.com/deryavuz1/UTSA_CCDC_Team/raw/refs/heads/main/Windows/sysmonmsix.exe" -OutFile "sysint.exe"
     
     
 
     Write-Host "[+] Finished downloading tools!" -ForegroundColor Green
     Write-Host "Installing SysInternals"
     Invoke-WebRequest "https://raw.githubusercontent.com/SouthwestCCDC/2025-Regionals-Shared/refs/heads/main/utsa/Windows/sysmon-config.xml" -OutFile "C:\Tools\sysmon-config.xml"
-    C:\Tools\sysinternals.exe
-    sysmon.exe -accepteula -i "C:\Tools\sysmon-config.xml"
 
     Write-Host "[+] Expanding archives"
     Expand-Archive -Path "C:\Tools\Autoruns.zip" -DestinationPath "C:\Tools\Autoruns" -Force
@@ -80,7 +77,7 @@ function Get-Tools {
     Write-Host "[+] Removed zip files"
 
     Rename-Item -Path "C:\Tools\Sysmon\Sysmon.exe" -NewName "StorageSyncSvc.exe" > $null
-    C:\Tools\Sysmon\StorageSyncSvc.exe -i -accepteula -d storagesync > $null
+    C:\Tools\Sysmon\StorageSyncSvc.exe -i "C:\Tools\sysmon-config.xml"-accepteula -d storagesync 2>&1 | Out-Null
     Write-Host "[+] Installed Sysmon"
     $acl = Get-ACL "C:\Windows\StorageSyncSvc.exe"
     $acl.SetAccessRuleProtection($True, $False)
@@ -391,7 +388,10 @@ function Generate-WDAC {
     $pf32Policy=$PolicyPath+"pf32.xml"
     $pdPolicy=$PolicyPath+"pd.xml"
     $toolsPolicy=$PolicyPath+"tools.xml"
-    $DefaultWindowsPolicy=$env:windir+"\schemas\CodeIntegrity\ExamplePolicies\DefaultWindows_Audit.xml"
+    $src = "$env:windir\schemas\CodeIntegrity\ExamplePolicies\DefaultWindows_Audit.xml"
+    $dst = "$env:USERPROFILE\Desktop\DefaultWindows_Audit.xml"
+    Copy-Item $src $dst -Force
+    $DefaultWindowsPolicy = $dst
     New-Item $Policy -Force > $null
 
     if (Test-Path "C:\Program Files\Microsoft\Exchange Server\") {
@@ -401,7 +401,7 @@ function Generate-WDAC {
 
     Write-Host "[+] Generating policy..."
     $pf64 = Start-Job -ScriptBlock { param($pf64Policy) New-CIPolicy -FilePath $pf64Policy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\Program Files\" -UserPEs -OmitPaths "C:\Program Files\WindowsApps\" } -ArgumentList $pf64Policy
-    $pf32 = Start-Job -ScriptBlock { param($pf32Policy) New-CIPolicy -FilePath $pf32Policy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\Program Files(x86)\" -UserPEs } -ArgumentList $pf32Policy
+    $pf32 = Start-Job -ScriptBlock { param($pf32Policy) New-CIPolicy -FilePath $pf32Policy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\Program Files (x86)\" -UserPEs } -ArgumentList $pf32Policy
     $pd = Start-Job -ScriptBlock { param($pdPolicy) New-CIPolicy -FilePath $pdPolicy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\ProgramData\" -UserPEs } -ArgumentList $pdPolicy
     $tools = Start-Job -ScriptBlock { param($toolsPolicy) New-CIPolicy -FilePath $toolsPolicy -Level FilePublisher -Fallback Hash -ScanPath "C:\Tools\" -UserPEs } -ArgumentList $toolsPolicy
 
@@ -418,6 +418,11 @@ function Generate-WDAC {
     $additional_blocks += New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath C:\Windows\System32\vssuirun.exe -Deny
     $additional_blocks += New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath C:\Windows\System32\ntdsutil.exe -Deny
     $additional_blocks += New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath C:\Windows\System32\reg.exe -Deny
+    #$additional_blocks += New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath C:\Windows\System32\wmic.exe -Deny
+    $additional_blocks += New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath C:\Windows\System32\certutil.exe -Deny
+    $additional_blocks += New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath C:\Windows\System32\mshta.exe -Deny
+    $additional_blocks += New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath C:\Windows\System32\wscript.exe -Deny
+    $additional_blocks += New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath C:\Windows\System32\cscript.exe -Deny
     Write-Host "[+] Generated policies!" -ForegroundColor Green
     
     Write-Host "[+] Merging policies..."
@@ -430,12 +435,11 @@ function Generate-WDAC {
     Set-CIPolicyVersion -FilePath $Policy -Version "1.0.0.0"
     Set-RuleOption -FilePath $Policy -Option 3 -Delete  # Audit Mode...add -Delete to put it in enforce mode
     Set-RuleOption -FilePath $Policy -Option 6  # Unsigned Policy
+    Set-RuleOption -FilePath $Policy -Option 8 -Delete $THIS triggers on DLLs too
     Set-RuleOption -FilePath $Policy -Option 9  # Advanced Boot Menu
     Set-RuleOption -FilePath $Policy -Option 10 # Boot Audit on Failure
-    Set-RuleOption -FilePath $Policy -Option 11 # Disabled:Script Enforcement
     Set-RuleOption -FilePath $Policy -Option 12 # Enforce Store Apps
     Set-RuleOption -FilePath $Policy -Option 14 # Intelligent Security Graph Authorization
-    Set-RuleOption -FilePath $Policy -Option 16 # No Reboot
     Set-RuleOption -FilePath $Policy -Option 19 # Dynamic Code Security
     Write-Host "[+] Added configuration rules to policy!"
 
