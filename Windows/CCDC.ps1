@@ -35,7 +35,7 @@ function Get-Cable {
     Invoke-WebRequest "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.103/dotnet-sdk-10.0.103-win-x64.exe" -outfile "C:\Tools\dotnet10.exe"
     C:\Tools\dotnet10.exe /quiet /norestart
     Write-Host "[+] Downloading Cable"
-    Invoke-WebRequest "https://github.com/logangoins/Cable/releases/download/1.0/Cable.exe -OutFile" "C:\Tools\Cable.exe"
+    Invoke-WebRequest "https://github.com/logangoins/Cable/releases/download/1.0/Cable.exe" -OutFile "C:\Tools\Cable.exe"
 
 }
 function Reset-AllUserPasswords {
@@ -519,7 +519,7 @@ function Generate-WDAC {
     Set-CIPolicyVersion -FilePath $Policy -Version "1.0.0.0"
     Set-RuleOption -FilePath $Policy -Option 3 -Delete  # Audit Mode...add -Delete to put it in enforce mode
     Set-RuleOption -FilePath $Policy -Option 6  # Unsigned Policy
-    Set-RuleOption -FilePath $Policy -Option 8 -Delete $THIS triggers on DLLs too
+    Set-RuleOption -FilePath $Policy -Option 8 -Delete #THIS triggers on DLLs too
     Set-RuleOption -FilePath $Policy -Option 9  # Advanced Boot Menu
     Set-RuleOption -FilePath $Policy -Option 10 # Boot Audit on Failure
     Set-RuleOption -FilePath $Policy -Option 12 # Enforce Store Apps
