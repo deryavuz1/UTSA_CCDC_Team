@@ -20,6 +20,28 @@ Function Get-LocalGroupMembers {
         Write-Host "Group '$GroupName' not found or has no members." -ForegroundColor Red
     }
 }
+Function Get-LocalGroupMembers {
+    param (
+        [string]$GroupName
+    )
+
+    $groupInfo = net localgroup "$GroupName" | Select-Object -Skip 6 | Where-Object {$_ -match '\S'}  
+
+    if ($groupInfo) {
+        Write-Host "`n$GroupName" -ForegroundColor Cyan
+        Write-Host "------------------------"
+
+        if ($groupInfo.Count - 1 -le 0) {
+            Write-Host "Group '$GroupName' not found or has no members." -ForegroundColor Red
+        }
+
+        for ($i = 0; $i -lt $groupInfo.Count - 1; $i++) {  # Iterate without last value
+            Write-Host "  - $($groupInfo[$i])"
+        }
+    } else {
+        Write-Host "Group '$GroupName' not found or has no members." -ForegroundColor Red
+    }
+}
 
 Function Get-RegistryKeys {
     param (
@@ -29,15 +51,16 @@ Function Get-RegistryKeys {
     $runKey = Get-Item -Path "$RegKey"
     $runKey.GetValueNames() | ForEach-Object { [PSCustomObject]@{ Name = $_; Value = $runKey.GetValue($_) } } | Out-Host
 }
+
 function Get-Cable {
-    Invoke-WebRequest "https://go.microsoft.com/fwlink/?linkid=874338" -outfile "C:\Tools\dotnet472.exe"
+    Invoke-WebRequest "https://go.microsoft.com/fwlink/?linkid=874338" -OutFile "C:\Tools\dotnet472.exe"
     C:\Tools\dotnet472.exe /quiet /norestart
-    Invoke-WebRequest "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.103/dotnet-sdk-10.0.103-win-x64.exe" -outfile "C:\Tools\dotnet10.exe"
+    Invoke-WebRequest "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.103/dotnet-sdk-10.0.103-win-x64.exe" -OutFile "C:\Tools\dotnet10.exe"
     C:\Tools\dotnet10.exe /quiet /norestart
     Write-Host "[+] Downloading Cable"
-    Invoke-WebRequest "https://github.com/logangoins/Cable/releases/download/1.0/Cable.exe" -OutFile "C:\Tools\Cable.exe"
-
+    Invoke-WebRequest "https://github.com/logangoins/Cable/releases/download/1.0/Cable.exe" -OutFile "C:\Tools\Cable.exe"  # FIX: moved -OutFile outside the URL string
 }
+
 function Reset-AllUserPasswords {
     # Requires the ActiveDirectory module
     Import-Module ActiveDirectory -ErrorAction Stop
@@ -120,8 +143,9 @@ function Reset-AllUserPasswords {
     Write-Host "`nDone. $successCount password(s) changed successfully, $failCount failure(s)." -ForegroundColor Cyan
     Write-Host "Passwords are saved at: $csvPath" -ForegroundColor Green
 }
+
 function Get-PingCastle {
-Invoke-WebRequest "https://github.com/netwrix/pingcastle/releases/download/3.5.0.37/PingCastle_3.5.0.37.zip" -outfile "C:\Tools\pingcastle.zip"
+    Invoke-WebRequest "https://github.com/netwrix/pingcastle/releases/download/3.5.0.37/PingCastle_3.5.0.37.zip" -OutFile "C:\Tools\pingcastle.zip"
     Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force
 }
 
@@ -144,7 +168,6 @@ function Get-Tools {
     Invoke-WebRequest "https://download.microsoft.com/download/1/f/0/1f0e9569-3350-4329-b443-822976f29284/ALTools.exe" -OutFile "C:\Tools\ALTools.exe"
     Invoke-WebRequest "https://github.com/deryavuz1/UTSA_CCDC_Team/raw/refs/heads/main/Windows/sysmonmsix.exe" -OutFile "C:\Tools\sysint.exe"
     Invoke-WebRequest "https://github.com/Graylog2/collector-sidecar/releases/download/1.5.0/graylog_sidecar_installer_1.5.0-1.exe" -OutFile "C:\Tools\sidecarinstall.exe"
-    
 
     Write-Host "[+] Finished downloading tools!" -ForegroundColor Green
     Write-Host "Installing SysInternals"
@@ -161,14 +184,14 @@ function Get-Tools {
     Write-Host "[+] Removed zip files"
 
     Rename-Item -Path "C:\Tools\Sysmon\Sysmon.exe" -NewName "StorageSyncSvc.exe" > $null
-    C:\Tools\Sysmon\StorageSyncSvc.exe -i "C:\Tools\sysmon-config.xml"-accepteula –h md5 -d storagesync 2>&1 | Out-Null
+    C:\Tools\Sysmon\StorageSyncSvc.exe -i "C:\Tools\sysmon-config.xml" -accepteula -h md5 -d storagesync 2>&1 | Out-Null
     Write-Host "[+] Installed Sysmon"
     $acl = Get-ACL "C:\Windows\StorageSyncSvc.exe"
     $acl.SetAccessRuleProtection($True, $False)
     Set-ACL "C:\Windows\StorageSyncSvc.exe" $acl | Out-Null
     $sddl = "O:BAG:DUD:PAI(A;;0x1200a9;;;SY)(A;;FA;;;BA)"
     $FileSecurity = New-Object System.Security.AccessControl.FileSecurity
-    $FileSecurity.SetSecurityDescriptorSddlForm($SDDL)
+    $FileSecurity.SetSecurityDescriptorSddlForm($sddl)
     Set-ACL -Path "C:\Windows\StorageSyncSvc.exe" -ACLObject $FileSecurity
     Write-Host "[+] Hardened Sysmon service configuration"
 
@@ -326,12 +349,12 @@ function Enumerate {
     Write-Output "`n"
 
     Get-SmbShare | ForEach-Object {
-    $share = $_
-    $access = Get-SmbShareAccess -Name $share.Name
-    $access | Select-Object @{Name="ShareName";Expression={$share.Name}}, 
-                            @{Name="SharePath";Expression={$share.Path}},
-                            @{Name="AccessRight";Expression={$_.AccessRight}},
-                            @{Name="AccountName";Expression={$_.AccountName}}
+        $share = $_
+        $access = Get-SmbShareAccess -Name $share.Name
+        $access | Select-Object @{Name="ShareName";Expression={$share.Name}}, 
+                                @{Name="SharePath";Expression={$share.Path}},
+                                @{Name="AccessRight";Expression={$_.AccessRight}},
+                                @{Name="AccountName";Expression={$_.AccountName}}
     } | Out-Host
     Read-Host -Prompt "Press enter to remove and limit unnecessary shares!"
     net share C$ /delete
@@ -390,7 +413,7 @@ function Phase2 {
     Get-Service "WebClient" | Stop-Service # MAY NOT BE PRESENT ON SOME MACHINES
     Get-Service "Spooler" | Stop-Service
     Get-Service "WinRM" | Stop-Service
-    Read-Host -Prompt "Press enter to start Defender services" # ALSO NOT WKRING
+    Read-Host -Prompt "Press enter to start Defender services" # ALSO NOT WORKING
     Get-Service "WinDefend" | Start-Service # Microsoft Defender Antivirus Service - MsMpEng.exe
     Get-Service "WdNisSvc" | Start-Service # Microsoft Defender Antivirus Network Inspection Service - NisSrv.exe
     Get-Service "MdCoreSvc" | Start-Service # Microsoft Defender Core Service - MpDefenderCoreService.exe # MAY NOT BE PRESENT
@@ -519,7 +542,7 @@ function Generate-WDAC {
     Set-CIPolicyVersion -FilePath $Policy -Version "1.0.0.0"
     Set-RuleOption -FilePath $Policy -Option 3 -Delete  # Audit Mode...add -Delete to put it in enforce mode
     Set-RuleOption -FilePath $Policy -Option 6  # Unsigned Policy
-    Set-RuleOption -FilePath $Policy -Option 8 -Delete #THIS triggers on DLLs too
+    Set-RuleOption -FilePath $Policy -Option 8 -Delete  # THIS triggers on DLLs too - FIX: was "$THIS triggers..." which is invalid
     Set-RuleOption -FilePath $Policy -Option 9  # Advanced Boot Menu
     Set-RuleOption -FilePath $Policy -Option 10 # Boot Audit on Failure
     Set-RuleOption -FilePath $Policy -Option 12 # Enforce Store Apps
@@ -571,7 +594,6 @@ Function Add-UsersToGroup {
         } catch {
             Write-Host "[-] Skill issue for user $User" -ForegroundColor Red
         }
-        
     }
 }
 
