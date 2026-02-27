@@ -9,6 +9,7 @@ require_root "$@"
 
 ROLE=""
 SERVER_IP=""
+GRAYLOG_IP=""
 
 prompt_role() {
   while true; do
@@ -66,8 +67,16 @@ EOF_SERVER
 }
 
 write_client_conf() {
-  cat >/etc/rsyslog.d/10-rsyslog-client.conf <<EOF_CLIENT
+  local client_cfg="/etc/rsyslog.d/10-rsyslog-client.conf"
+  local summary=""
+
+  cat >"$client_cfg" <<'EOF_CLIENT'
 # Managed by section5_setup_rsyslog.sh
+EOF_CLIENT
+
+  if [[ -n "$SERVER_IP" ]]; then
+    cat >>"$client_cfg" <<EOF_RSYSLOG
+# Forward all logs to centralized rsyslog server
 *.* action(
   type="omfwd"
   target="$SERVER_IP"
@@ -75,14 +84,39 @@ write_client_conf() {
   protocol="tcp"
   action.resumeRetryCount="-1"
   queue.type="linkedList"
-  queue.filename="fwdRule1"
+  queue.filename="fwd_rsyslog_server"
   queue.maxDiskSpace="1g"
   queue.saveOnShutdown="on"
 )
-EOF_CLIENT
+EOF_RSYSLOG
+    summary="rsyslog:$SERVER_IP"
+  fi
+
+  if [[ -n "$GRAYLOG_IP" ]]; then
+    cat >>"$client_cfg" <<EOF_GRAYLOG
+# Forward all logs to Graylog server
+*.* action(
+  type="omfwd"
+  target="$GRAYLOG_IP"
+  port="5140"
+  protocol="tcp"
+  template="RSYSLOG_SyslogProtocol23Format"
+  action.resumeRetryCount="-1"
+  queue.type="linkedList"
+  queue.filename="fwd_graylog_server"
+  queue.maxDiskSpace="1g"
+  queue.saveOnShutdown="on"
+)
+EOF_GRAYLOG
+    if [[ -n "$summary" ]]; then
+      summary="${summary}, graylog:$GRAYLOG_IP"
+    else
+      summary="graylog:$GRAYLOG_IP"
+    fi
+  fi
 
   rm -f /etc/rsyslog.d/10-rsyslog-server.conf
-  ok "Configured host as rsyslog client -> $SERVER_IP"
+  ok "Configured host as log forwarder -> $summary"
 }
 
 validate_and_restart() {
@@ -113,9 +147,11 @@ section_header "Section 5 - Setup Rsyslog"
 section_header "1) Choose Server or Client"
 prompt_role
 if [[ "$ROLE" == "client" ]]; then
-  read -r -p "Enter the rsyslog server IP/FQDN: " SERVER_IP
-  if [[ -z "$SERVER_IP" ]]; then
-    error "Server IP/FQDN is required for client mode."
+  read -r -p "Enter the rsyslog server IP/FQDN (blank to skip rsyslog target): " SERVER_IP
+  read -r -p "Enter the Graylog server IP/FQDN (blank to skip Graylog target): " GRAYLOG_IP
+
+  if [[ -z "$SERVER_IP" && -z "$GRAYLOG_IP" ]]; then
+    error "At least one destination must be set in client mode (rsyslog or Graylog)."
     exit 1
   fi
 fi
