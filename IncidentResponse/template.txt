@@ -1,0 +1,8 @@
+Date & Time:
+Software Affeceted:
+Impact (high, med, low & the result of attack):
+Host(s) Affected:
+User(s) Affected:
+Summary of Incident:
+Resolution:
+Evidence (i.e Virus Total):

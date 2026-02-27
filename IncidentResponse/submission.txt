@@ -1,0 +1,15 @@
+On _____, 2026, at ______ CT, the ______ Blue Team identified ______.
+
+*description of attack mechanism*
+
+*hosts and users affected and how*
+
+In total, nine systems were affected within the ______ domain:
+- *list systems here*
+
+The Blue Team responded by ______.
+
+This incident has been contained as of ______. From identification to containment, the total duration was ______.
+
+Below is the evidence identified during investigation.
+*evidence here*
