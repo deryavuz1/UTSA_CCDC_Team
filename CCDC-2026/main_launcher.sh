@@ -20,12 +20,12 @@ else
 fi
 
 # Placeholder links. Override with environment variables before running.
-SECTION1_URL="${SECTION1_URL:-https://raw.githubusercontent.com/TheOriginalOrangeJuice/tempCompRepo/refs/heads/main/section1_enumeration.sh}"
-SECTION2_URL="${SECTION2_URL:-https://raw.githubusercontent.com/TheOriginalOrangeJuice/tempCompRepo/refs/heads/main/section2_initial_hardening.sh}"
-SECTION3_URL="${SECTION3_URL:-https://raw.githubusercontent.com/TheOriginalOrangeJuice/tempCompRepo/refs/heads/main/section3_password_changes.sh}"
-SECTION4_URL="${SECTION4_URL:-https://raw.githubusercontent.com/TheOriginalOrangeJuice/tempCompRepo/refs/heads/main/section4_setup_logging.sh}"
-SECTION5_URL="${SECTION5_URL:-https://raw.githubusercontent.com/TheOriginalOrangeJuice/tempCompRepo/refs/heads/main/section5_setup_rsyslog.sh}"
-AUDIT_RULES_URL="${AUDIT_RULES_URL:-https://raw.githubusercontent.com/TheOriginalOrangeJuice/tempCompRepo/refs/heads/main/audit.rules}"
+SECTION1_URL="${SECTION1_URL:-https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/CCDC-2026/section1_enumeration.sh}"
+SECTION2_URL="${SECTION2_URL:-https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/CCDC-2026/section2_initial_hardening.sh}"
+SECTION3_URL="${SECTION3_URL:-https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/CCDC-2026/section3_password_changes.sh}"
+SECTION4_URL="${SECTION4_URL:-https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/CCDC-2026/section4_setup_logging.sh}"
+SECTION5_URL="${SECTION5_URL:-https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/CCDC-2026/section5_setup_rsyslog.sh}"
+AUDIT_RULES_URL="${AUDIT_RULES_URL:-https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/CCDC-2026/audit.rules}"
 export SECTION1_URL SECTION2_URL SECTION3_URL SECTION4_URL SECTION5_URL AUDIT_RULES_URL
 
 log_line() {
