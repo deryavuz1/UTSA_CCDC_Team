@@ -39,7 +39,6 @@ function Get-Cable {
 
 }
 function Reset-AllUserPasswords {
-
     # Requires the ActiveDirectory module
     Import-Module ActiveDirectory -ErrorAction Stop
 
@@ -82,11 +81,14 @@ function Reset-AllUserPasswords {
         })
     }
 
-    # Save CSV to the current user's desktop
+    # Save CSV to the current user's desktop (no quotes)
     $desktopPath = [Environment]::GetFolderPath('Desktop')
     $csvPath = Join-Path $desktopPath "NewPasswords_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
 
-    $passwordList | Export-Csv -Path $csvPath -NoTypeInformation
+    "Username,Password" | Set-Content -Path $csvPath
+    foreach ($entry in $passwordList) {
+        "$($entry.Username),$($entry.Password)" | Add-Content -Path $csvPath
+    }
 
     Write-Host "`nPassword list saved to: $csvPath" -ForegroundColor Green
     Write-Host "Please open and review the file before proceeding." -ForegroundColor Yellow
@@ -140,8 +142,8 @@ function Get-Tools {
     Invoke-WebRequest https://github.com/zeronetworks/ldapfw/releases/download/v1.0.0/ldapfw_v1.0.0-x64.zip -OutFile "C:\Tools\ldapfw.zip"
     Write-Host "[+] Downloading Account Lockout Tools"
     Invoke-WebRequest "https://download.microsoft.com/download/1/f/0/1f0e9569-3350-4329-b443-822976f29284/ALTools.exe" -OutFile "C:\Tools\ALTools.exe"
-    Invoke-WebRequest "https://github.com/deryavuz1/UTSA_CCDC_Team/raw/refs/heads/main/Windows/sysmonmsix.exe" -OutFile "sysint.exe"
-    
+    Invoke-WebRequest "https://github.com/deryavuz1/UTSA_CCDC_Team/raw/refs/heads/main/Windows/sysmonmsix.exe" -OutFile "C:\Tools\sysint.exe"
+    Invoke-WebRequest "https://github.com/Graylog2/collector-sidecar/releases/download/1.5.0/graylog_sidecar_installer_1.5.0-1.exe" -OutFile "C:\Tools\sidecarinstall.exe"
     
 
     Write-Host "[+] Finished downloading tools!" -ForegroundColor Green
