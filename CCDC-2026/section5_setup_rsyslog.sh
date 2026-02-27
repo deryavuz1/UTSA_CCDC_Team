@@ -71,7 +71,7 @@ write_client_conf() {
 *.* action(
   type="omfwd"
   target="$SERVER_IP"
-  port="5140"
+  port="514"
   protocol="tcp"
   action.resumeRetryCount="-1"
   queue.type="linkedList"
