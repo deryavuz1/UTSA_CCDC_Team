@@ -497,7 +497,25 @@ function Generate-WDAC {
     $toolsPolicy=$PolicyPath+"tools.xml"
     $src = "$env:windir\schemas\CodeIntegrity\ExamplePolicies\DefaultWindows_Audit.xml"
     $dst = "$env:USERPROFILE\Desktop\DefaultWindows_Audit.xml"
-    Copy-Item $src $dst -Force
+
+    # --- NEW: Copy local file if it exists, otherwise download from GitHub ---
+    if (Test-Path $src) {
+        Write-Host "[+] Found DefaultWindows_Audit.xml locally, copying..." -ForegroundColor Cyan
+        Copy-Item $src $dst -Force
+    } else {
+        Write-Host "[!] DefaultWindows_Audit.xml not found locally. Downloading from GitHub..." -ForegroundColor Yellow
+        $downloadUrl = "https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/Windows/DefaultWindows_Audit.xml"
+        try {
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $dst -UseBasicParsing -ErrorAction Stop
+            Write-Host "[+] Successfully downloaded DefaultWindows_Audit.xml" -ForegroundColor Green
+        } catch {
+            Write-Host "[!] Failed to download DefaultWindows_Audit.xml: $_" -ForegroundColor Red
+            Write-Host "[!] Cannot continue without a base policy. Exiting." -ForegroundColor Red
+            return
+        }
+    }
+    # -------------------------------------------------------------------------
+
     $DefaultWindowsPolicy = $dst
     New-Item $Policy -Force > $null
 
@@ -542,7 +560,7 @@ function Generate-WDAC {
     Set-CIPolicyVersion -FilePath $Policy -Version "1.0.0.0"
     Set-RuleOption -FilePath $Policy -Option 3 -Delete  # Audit Mode...add -Delete to put it in enforce mode
     Set-RuleOption -FilePath $Policy -Option 6  # Unsigned Policy
-    Set-RuleOption -FilePath $Policy -Option 8 -Delete  # THIS triggers on DLLs too - FIX: was "$THIS triggers..." which is invalid
+    Set-RuleOption -FilePath $Policy -Option 8 -Delete  # THIS triggers on DLLs too
     Set-RuleOption -FilePath $Policy -Option 9  # Advanced Boot Menu
     Set-RuleOption -FilePath $Policy -Option 10 # Boot Audit on Failure
     Set-RuleOption -FilePath $Policy -Option 12 # Enforce Store Apps
