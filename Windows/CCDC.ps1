@@ -1,24 +1,147 @@
-Function Get-LocalGroupMembers {
-    param (
-        [string]$GroupName
-    )
+#[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+function Reset-ServiceAccountPasswords {
+    # Requires the ActiveDirectory module
+    Import-Module ActiveDirectory -ErrorAction Stop
 
-    $groupInfo = net localgroup "$GroupName" | Select-Object -Skip 6 | Where-Object {$_ -match '\S'}  
-
-    if ($groupInfo) {
-        Write-Host "`n$GroupName" -ForegroundColor Cyan
-        Write-Host "------------------------"
-
-        if ($groupInfo.Count - 1 -le 0) {
-            Write-Host "Group '$GroupName' not found or has no members." -ForegroundColor Red
-        }
-
-        for ($i = 0; $i -lt $groupInfo.Count - 1; $i++) {  # Iterate without last value
-            Write-Host "  - $($groupInfo[$i])"
-        }
-    } else {
-        Write-Host "Group '$GroupName' not found or has no members." -ForegroundColor Red
+    # Generate a random alphanumeric password of specified length
+    function New-RandomPassword {
+        param([int]$Length = 16)
+        $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+        $password = -join ((1..$Length) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
+        return $password
     }
+
+    # Define base service accounts to always exclude
+    $excludedAccounts = [System.Collections.Generic.List[string]]@()
+
+    # Prompt for exclusions upfront
+    Write-Host "`nEnter service account usernames to exclude (comma-separated), or press ENTER to skip:" -ForegroundColor Yellow
+    $extraInput = Read-Host
+
+    if (-not [string]::IsNullOrWhiteSpace($extraInput)) {
+        $extraAccounts = $extraInput -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+        foreach ($a in $extraAccounts) {
+            $excludedAccounts.Add($a)
+        }
+        Write-Host "Excluded accounts: $($excludedAccounts -join ', ')" -ForegroundColor Cyan
+    }
+
+    Write-Host "`nQuerying Active Directory for service accounts..." -ForegroundColor Cyan
+
+    # Pull service accounts by common naming conventions AND managed service accounts
+    # Catches: accounts with 'svc', 'service', 'sa-', 'svc-' in the name
+    # Also catches: OU-based service accounts and ManagedServiceAccount objects
+    $allUsers = Get-ADUser -Filter { Enabled -eq $true } -Properties SamAccountName, Description, ServicePrincipalNames |
+        Where-Object {
+            $_.SamAccountName -match '(?i)(^svc|^sa[-_]|[-_]svc$|service|[-_]sa$|^service)' -or
+            $_.ServicePrincipalNames.Count -gt 0
+        } |
+        Where-Object { $excludedAccounts -notcontains $_.SamAccountName }
+
+    # Also grab Managed Service Accounts (gMSA/MSA)
+    $msaAccounts = Get-ADServiceAccount -Filter { Enabled -eq $true } -Properties SamAccountName |
+        Where-Object { $excludedAccounts -notcontains $_.SamAccountName }
+
+    if ((-not $allUsers) -and (-not $msaAccounts)) {
+        Write-Warning "No eligible service accounts found. Exiting."
+        return
+    }
+
+    Write-Host "Found $($allUsers.Count) service account(s) and $($msaAccounts.Count) managed service account(s) to process." -ForegroundColor Cyan
+
+    # Build the password list, ensuring uniqueness
+    $passwordList = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $usedPasswords = [System.Collections.Generic.HashSet[string]]::new()
+
+    foreach ($account in $allUsers) {
+        do {
+            $newPassword = New-RandomPassword -Length 16
+        } while (-not $usedPasswords.Add($newPassword))
+
+        $passwordList.Add([PSCustomObject]@{
+            Username = $account.SamAccountName
+            Password = $newPassword
+            Type     = if ($account.ServicePrincipalNames.Count -gt 0) { "SPN" } else { "ServiceAccount" }
+        })
+    }
+
+    # Note MSAs in the list but flag them — their passwords are managed automatically by AD
+    foreach ($msa in $msaAccounts) {
+        $passwordList.Add([PSCustomObject]@{
+            Username = $msa.SamAccountName
+            Password = "MANAGED-BY-AD"
+            Type     = "ManagedServiceAccount"
+        })
+    }
+
+    # Save CSV to the current user's desktop
+    $desktopPath = [Environment]::GetFolderPath('Desktop')
+    $csvPath = Join-Path $desktopPath "ServiceAccountPasswords_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+    "Username,Password,Type" | Set-Content -Path $csvPath
+    foreach ($entry in $passwordList) {
+        "$($entry.Username),$($entry.Password),$($entry.Type)" | Add-Content -Path $csvPath
+    }
+
+    Write-Host "`nPassword list saved to: $csvPath" -ForegroundColor Green
+    Write-Host "Please open and review the file before proceeding." -ForegroundColor Yellow
+    Write-Host "`nThe following $($passwordList.Count) account(s) will be processed:" -ForegroundColor Yellow
+    $passwordList | Format-Table -AutoSize
+
+    Write-Host "[!] NOTE: ManagedServiceAccount entries will be skipped during password change - AD manages those automatically." -ForegroundColor Cyan
+
+    # Second chance to exclude more accounts after reviewing the list
+    Write-Host "Any further accounts to remove before applying? (comma-separated), or press ENTER to continue:" -ForegroundColor Yellow
+    $lateExclusions = Read-Host
+
+    if (-not [string]::IsNullOrWhiteSpace($lateExclusions)) {
+        $lateAccounts = $lateExclusions -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+
+        foreach ($a in $lateAccounts) {
+            $match = $passwordList | Where-Object { $_.Username -eq $a }
+            if ($match) {
+                $passwordList.Remove($match) | Out-Null
+                Write-Host "  [REMOVED] $a from password change list" -ForegroundColor Yellow
+            } else {
+                Write-Warning "  [NOT FOUND] $a was not in the list, skipping"
+            }
+        }
+
+        # Rewrite the CSV without removed accounts
+        "Username,Password,Type" | Set-Content -Path $csvPath
+        foreach ($entry in $passwordList) {
+            "$($entry.Username),$($entry.Password),$($entry.Type)" | Add-Content -Path $csvPath
+        }
+        Write-Host "CSV updated to remove excluded accounts." -ForegroundColor Cyan
+    }
+
+    Write-Host "`nPress ENTER to begin changing $($passwordList.Count) password(s), or CTRL+C to abort..." -ForegroundColor Red
+    Read-Host | Out-Null
+
+    # Apply the new passwords (skip MSAs)
+    $successCount = 0
+    $failCount    = 0
+    $skippedCount = 0
+
+    foreach ($entry in $passwordList) {
+        if ($entry.Type -eq "ManagedServiceAccount") {
+            Write-Host "  [SKIP] $($entry.Username) - Managed Service Account, password handled by AD" -ForegroundColor DarkYellow
+            $skippedCount++
+            continue
+        }
+        try {
+            $securePassword = ConvertTo-SecureString $entry.Password -AsPlainText -Force
+            Set-ADAccountPassword -Identity $entry.Username -NewPassword $securePassword -Reset
+            Write-Host "  [OK] $($entry.Username)" -ForegroundColor Green
+            $successCount++
+        }
+        catch {
+            Write-Warning "  [FAIL] $($entry.Username) - $($_.Exception.Message)"
+            $failCount++
+        }
+    }
+
+    Write-Host "`nDone. $successCount password(s) changed, $skippedCount skipped (MSA), $failCount failure(s)." -ForegroundColor Cyan
+    Write-Host "Passwords are saved at: $csvPath" -ForegroundColor Green
 }
 Function Get-LocalGroupMembers {
     param (
@@ -58,7 +181,8 @@ function Get-Cable {
     Invoke-WebRequest "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.103/dotnet-sdk-10.0.103-win-x64.exe" -OutFile "C:\Tools\dotnet10.exe"
     C:\Tools\dotnet10.exe /quiet /norestart
     Write-Host "[+] Downloading Cable"
-    Invoke-WebRequest "https://github.com/logangoins/Cable/releases/download/1.0/Cable.exe" -OutFile "C:\Tools\Cable.exe"  # FIX: moved -OutFile outside the URL string
+    Invoke-WebRequest "https://github.com/logangoins/Cable/archive/refs/heads/main.zip" -OutFile "C:\Tools\Cable.zip"  # FIX: moved -OutFile outside the URL string
+    Invoke-WebRequest "https://github.com/GhostPack/Certify/archive/refs/heads/main.zip" -OutFile "C:\Tools\Certify.zip"
 }
 
 function Reset-AllUserPasswords {
@@ -73,10 +197,23 @@ function Reset-AllUserPasswords {
         return $password
     }
 
-    # Define accounts to exclude
-    $excludedUsers = @('Administrator', 'krgbt')
+    # Define base accounts to always exclude
+    $excludedUsers = [System.Collections.Generic.List[string]]@('Administrator', 'krgbt')
 
-    Write-Host "Querying Active Directory for all enabled user accounts..." -ForegroundColor Cyan
+    # Prompt for additional exclusions
+    Write-Host "`nDefault excluded accounts: $($excludedUsers -join ', ')" -ForegroundColor Cyan
+    Write-Host "Enter additional usernames to exclude (comma-separated), or press ENTER to skip:" -ForegroundColor Yellow
+    $extraInput = Read-Host
+
+    if (-not [string]::IsNullOrWhiteSpace($extraInput)) {
+        $extraUsers = $extraInput -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+        foreach ($u in $extraUsers) {
+            $excludedUsers.Add($u)
+        }
+        Write-Host "Updated exclusion list: $($excludedUsers -join ', ')" -ForegroundColor Cyan
+    }
+
+    Write-Host "`nQuerying Active Directory for all enabled user accounts..." -ForegroundColor Cyan
 
     # Pull all enabled users, excluding the protected accounts
     $users = Get-ADUser -Filter { Enabled -eq $true } -Properties SamAccountName |
@@ -96,7 +233,7 @@ function Reset-AllUserPasswords {
     foreach ($user in $users) {
         do {
             $newPassword = New-RandomPassword -Length 16
-        } while (-not $usedPasswords.Add($newPassword))  # .Add() returns $false if already present
+        } while (-not $usedPasswords.Add($newPassword))
 
         $passwordList.Add([PSCustomObject]@{
             Username = $user.SamAccountName
@@ -107,7 +244,6 @@ function Reset-AllUserPasswords {
     # Save CSV to the current user's desktop (no quotes)
     $desktopPath = [Environment]::GetFolderPath('Desktop')
     $csvPath = Join-Path $desktopPath "NewPasswords_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
-
     "Username,Password" | Set-Content -Path $csvPath
     foreach ($entry in $passwordList) {
         "$($entry.Username),$($entry.Password)" | Add-Content -Path $csvPath
@@ -118,7 +254,33 @@ function Reset-AllUserPasswords {
     Write-Host "`nThe following $($users.Count) account(s) will have their passwords changed:" -ForegroundColor Yellow
     $passwordList | Format-Table -AutoSize
 
-    Write-Host "Press ENTER to begin changing passwords, or CTRL+C to abort..." -ForegroundColor Red
+    # Second chance to exclude more users after reviewing the list
+    Write-Host "Any further accounts to remove before applying? (comma-separated), or press ENTER to continue:" -ForegroundColor Yellow
+    $lateExclusions = Read-Host
+
+    if (-not [string]::IsNullOrWhiteSpace($lateExclusions)) {
+        $lateUsers = $lateExclusions -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
+
+        # Remove from passwordList
+        foreach ($u in $lateUsers) {
+            $match = $passwordList | Where-Object { $_.Username -eq $u }
+            if ($match) {
+                $passwordList.Remove($match) | Out-Null
+                Write-Host "  [REMOVED] $u from password change list" -ForegroundColor Yellow
+            } else {
+                Write-Warning "  [NOT FOUND] $u was not in the list, skipping"
+            }
+        }
+
+        # Rewrite the CSV without the removed users
+        "Username,Password" | Set-Content -Path $csvPath
+        foreach ($entry in $passwordList) {
+            "$($entry.Username),$($entry.Password)" | Add-Content -Path $csvPath
+        }
+        Write-Host "CSV updated to remove excluded accounts." -ForegroundColor Cyan
+    }
+
+    Write-Host "`nPress ENTER to begin changing $($passwordList.Count) password(s), or CTRL+C to abort..." -ForegroundColor Red
     Read-Host | Out-Null
 
     # Apply the new passwords
@@ -129,8 +291,6 @@ function Reset-AllUserPasswords {
         try {
             $securePassword = ConvertTo-SecureString $entry.Password -AsPlainText -Force
             Set-ADAccountPassword -Identity $entry.Username -NewPassword $securePassword -Reset
-            # Optionally force a password change at next logon:
-            # Set-ADUser -Identity $entry.Username -ChangePasswordAtLogon $true
             Write-Host "  [OK] $($entry.Username)" -ForegroundColor Green
             $successCount++
         }
@@ -495,7 +655,7 @@ function Generate-WDAC {
     $pf32Policy=$PolicyPath+"pf32.xml"
     $pdPolicy=$PolicyPath+"pd.xml"
     $toolsPolicy=$PolicyPath+"tools.xml"
-    $src = "$env:windir\schemas\CodeIntegrity\ExamplePolicies\DefaultWindows_Audit.xml"
+    $src = "$env:windir\schemas\CodeIntegrity\ExamplePolicies\DefaultWindows_enforced.xml"
     $dst = "$env:USERPROFILE\Desktop\DefaultWindows_Audit.xml"
 
     # --- NEW: Copy local file if it exists, otherwise download from GitHub ---
@@ -558,14 +718,21 @@ function Generate-WDAC {
     
     Set-CIPolicyIdInfo -FilePath $Policy -PolicyName $PolicyName
     Set-CIPolicyVersion -FilePath $Policy -Version "1.0.0.0"
-    Set-RuleOption -FilePath $Policy -Option 3 -Delete  # Audit Mode...add -Delete to put it in enforce mode
-    Set-RuleOption -FilePath $Policy -Option 6  # Unsigned Policy
-    Set-RuleOption -FilePath $Policy -Option 8 -Delete  # THIS triggers on DLLs too
-    Set-RuleOption -FilePath $Policy -Option 9  # Advanced Boot Menu
-    Set-RuleOption -FilePath $Policy -Option 10 # Boot Audit on Failure
-    Set-RuleOption -FilePath $Policy -Option 12 # Enforce Store Apps
-    Set-RuleOption -FilePath $Policy -Option 14 # Intelligent Security Graph Authorization
-    Set-RuleOption -FilePath $Policy -Option 19 # Dynamic Code Security
+    Set-RuleOption -FilePath $Policy -Option 3 -Delete  # Audit Mode
+    Set-RuleOption -FilePath $Policy -Option 6          # Unsigned Policy
+    Set-RuleOption -FilePath $Policy -Option 8 -Delete  # DLL enforcement
+    Set-RuleOption -FilePath $Policy -Option 9          # Advanced Boot Menu
+    Set-RuleOption -FilePath $Policy -Option 10         # Boot Audit on Failure
+    Set-RuleOption -FilePath $Policy -Option 12         # Enforce Store Apps
+
+    # Options 14 (ISG) and 19 (Dynamic Code Security) require Server 2019+ / Win10 1903+
+    $osBuild = [System.Environment]::OSVersion.Version.Build
+    if ($osBuild -ge 17763) {
+        Set-RuleOption -FilePath $Policy -Option 14     # Intelligent Security Graph
+        Set-RuleOption -FilePath $Policy -Option 19     # Dynamic Code Security
+    } else {
+        Write-Host "[!] Skipping options 14 and 19 - not supported on this OS (build $osBuild)" -ForegroundColor Yellow
+    }
     Write-Host "[+] Added configuration rules to policy!"
 
     $PolicyBin = $PolicyPath+"SiPolicy.p7b"
@@ -613,40 +780,4 @@ Function Add-UsersToGroup {
             Write-Host "[-] Skill issue for user $User" -ForegroundColor Red
         }
     }
-}
-
-Function Group-Passwords {
-    param(
-        $Group,
-        $PasswordFile,
-        $OutputCSV
-    )
-    $GroupUsers = Get-GroupMembersRecursive -GroupName $Group | Where-Object { $_.SamAccountName -ne $ExcludeUser }
-    $Passwords = Get-Content -Path $PasswordFile
-
-    if ($Passwords.Count -lt $GroupUsers.Count) {
-        Write-Host "Error: Not enough passwords in the file!" -ForegroundColor Red
-        exit
-    }
-
-    $Results = @()
-
-    for ($i = 0; $i -lt $GroupUsers.Count; $i++) {
-        $User = $GroupUsers[$i]
-        $NewPassword = ConvertTo-SecureString -String $Passwords[$i] -AsPlainText -Force
-
-        try {
-            Set-ADAccountPassword -Identity $User.SamAccountName -NewPassword $NewPassword -Reset
-            $Results += [PSCustomObject]@{
-                Username = $User.SamAccountName
-                NewPassword = $Passwords[$i]
-            }
-            Write-Host "Password changed for: $($User.SamAccountName)" -ForegroundColor Green
-        } catch {
-            Write-Host "Failed to change password for: $($User.SamAccountName) - $_" -ForegroundColor Red
-        }
-    }
-
-    $Results | Export-Csv -Path $OutputCSV -NoTypeInformation
-    Write-Host "Password changes completed. Output saved to $OutputCSV" -ForegroundColor Cyan
 }
