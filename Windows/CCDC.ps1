@@ -343,17 +343,17 @@ function Get-Tools {
     Remove-Item "C:\Tools\ldapfw.zip"
     Write-Host "[+] Removed zip files"
 
-    Rename-Item -Path "C:\Tools\Sysmon\Sysmon.exe" -NewName "StorageSyncSvc.exe" > $null
-    C:\Tools\Sysmon\StorageSyncSvc.exe -i "C:\Tools\sysmon-config.xml" -accepteula -h md5 -d storagesync 2>&1 | Out-Null
-    Write-Host "[+] Installed Sysmon"
-    $acl = Get-ACL "C:\Windows\StorageSyncSvc.exe"
-    $acl.SetAccessRuleProtection($True, $False)
-    Set-ACL "C:\Windows\StorageSyncSvc.exe" $acl | Out-Null
-    $sddl = "O:BAG:DUD:PAI(A;;0x1200a9;;;SY)(A;;FA;;;BA)"
-    $FileSecurity = New-Object System.Security.AccessControl.FileSecurity
-    $FileSecurity.SetSecurityDescriptorSddlForm($sddl)
-    Set-ACL -Path "C:\Windows\StorageSyncSvc.exe" -ACLObject $FileSecurity
-    Write-Host "[+] Hardened Sysmon service configuration"
+    # Rename-Item -Path "C:\Tools\Sysmon\Sysmon.exe" -NewName "StorageSyncSvc.exe" > $null
+    # C:\Tools\Sysmon\Sysmon.exe -i "C:\Tools\sysmon-config.xml" -accepteula -h md5 -d storagesync 2>&1 | Out-Null
+    # Write-Host "[+] Installed Sysmon"
+    # $acl = Get-ACL "C:\Windows\StorageSyncSvc.exe"
+    # $acl.SetAccessRuleProtection($True, $False)
+    # Set-ACL "C:\Windows\StorageSyncSvc.exe" $acl | Out-Null
+    # $sddl = "O:BAG:DUD:PAI(A;;0x1200a9;;;SY)(A;;FA;;;BA)"
+    # $FileSecurity = New-Object System.Security.AccessControl.FileSecurity
+    # $FileSecurity.SetSecurityDescriptorSddlForm($sddl)
+    # Set-ACL -Path "C:\Windows\StorageSyncSvc.exe" -ACLObject $FileSecurity
+    # Write-Host "[+] Hardened Sysmon service configuration"
 
     Invoke-WebRequest https://raw.githubusercontent.com/zeronetworks/ldapfw/refs/heads/master/example_configs/DACLPrevention_config.json -OutFile "C:\Tools\ldapfw\DACLPrevention_config.json"
     Move-Item "C:\Tools\ldapfw\DACLPrevention_config.json" "C:\Tools\ldapfw\config.json" -Force

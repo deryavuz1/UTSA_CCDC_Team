@@ -1,0 +1,86 @@
+services:
+
+  # ── MongoDB ────────────────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:8.0
+    container_name: mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - graylog
+
+  # ── OpenSearch ─────────────────────────────────────────────────────────────
+  # WARNING: Do NOT upgrade to OpenSearch 3.0+ — it is not supported by Graylog.
+  opensearch:
+    image: opensearchproject/opensearch:2.19.0
+    container_name: opensearch
+    restart: unless-stopped
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+      - "bootstrap.memory_lock=true"
+      - "discovery.type=single-node"
+      - "action.auto_create_index=false"
+      - "plugins.security.ssl.http.enabled=false"
+      - "plugins.security.disabled=true"
+      - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=+_8r#wliY3Kj"
+    ulimits:
+      memlock:
+        hard: -1
+        soft: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    networks:
+      - graylog
+
+  # ── Graylog ────────────────────────────────────────────────────────────────
+  graylog:
+    image: graylog/graylog:7.0
+    container_name: graylog
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+      - opensearch
+    environment:
+      # REQUIRED: Generate with: pwgen -N 1 -s 96
+      # Example only — replace with your own secret before deploying!
+      - GRAYLOG_PASSWORD_SECRET=${GRAYLOG_PASSWORD_SECRET:-replacethiswithatleast64characterslongsecretstring0000000000000000}
+
+      # REQUIRED: SHA-256 hash of your admin password.
+      # Generate with: echo -n "yourpassword" | sha256sum
+      # Default below = hash of "admin" — change before deploying!
+      - GRAYLOG_ROOT_PASSWORD_SHA2=${GRAYLOG_ROOT_PASSWORD_SHA2:-8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918}
+
+      - GRAYLOG_HTTP_EXTERNAL_URI=http://0.0.0.0:9000/
+      - GRAYLOG_HTTP_BIND_ADDRESS=0.0.0.0:9000
+      - GRAYLOG_ELASTICSEARCH_HOSTS=http://opensearch:9200
+      - GRAYLOG_MONGODB_URI=mongodb://mongodb:27017/graylog
+
+      # Reduce journal size to fit smaller disks (default is 5120 MB)
+      - GRAYLOG_MESSAGE_JOURNAL_MAX_SIZE=1gb
+
+      # Timezone (optional)
+      - TZ=UTC
+    ports:
+      - "9000:9000"     # Graylog web UI & REST API
+      - "5044:5044"     # Beats input
+      - "5140:5140/udp" # Syslog UDP
+      - "5140:5140/tcp" # Syslog TCP
+      - "12201:12201"   # GELF TCP
+      - "12201:12201/udp" # GELF UDP
+    volumes:
+      - graylog_data:/usr/share/graylog/data
+    networks:
+      - graylog
+
+volumes:
+  mongodb_data:
+  opensearch_data:
+  graylog_data:
+
+networks:
+  graylog:
+    driver: bridge
