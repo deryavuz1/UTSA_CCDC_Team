@@ -344,7 +344,7 @@ function Get-Tools {
     Write-Host "[+] Removed zip files"
 
     # Rename-Item -Path "C:\Tools\Sysmon\Sysmon.exe" -NewName "StorageSyncSvc.exe" > $null
-    # C:\Tools\Sysmon\Sysmon.exe -i "C:\Tools\sysmon-config.xml" -accepteula -h md5 -d storagesync 2>&1 | Out-Null
+    C:\Tools\Sysmon\Sysmon.exe -i "C:\Tools\sysmon-config.xml" -accepteula -h md5 -d storagesync 2>&1 | Out-Null
     # Write-Host "[+] Installed Sysmon"
     # $acl = Get-ACL "C:\Windows\StorageSyncSvc.exe"
     # $acl.SetAccessRuleProtection($True, $False)
