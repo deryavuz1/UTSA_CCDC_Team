@@ -327,7 +327,6 @@ function Get-Tools {
     Write-Host "[+] Downloading Account Lockout Tools"
     Invoke-WebRequest "https://download.microsoft.com/download/1/f/0/1f0e9569-3350-4329-b443-822976f29284/ALTools.exe" -OutFile "C:\Tools\ALTools.exe"
     Invoke-WebRequest "https://github.com/deryavuz1/UTSA_CCDC_Team/raw/refs/heads/main/Windows/sysmonmsix.exe" -OutFile "C:\Tools\sysint.exe"
-    Invoke-WebRequest "https://github.com/Graylog2/collector-sidecar/releases/download/1.5.0/graylog_sidecar_installer_1.5.0-1.exe" -OutFile "C:\Tools\sidecarinstall.exe"
 
     Write-Host "[+] Finished downloading tools!" -ForegroundColor Green
     Write-Host "Installing SysInternals"
