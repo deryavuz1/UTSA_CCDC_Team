@@ -11,6 +11,13 @@ TARGET_USER="${SUDO_USER:-root}"
 TARGET_HOME="$(getent passwd "$TARGET_USER" | awk -F: '{print $6}')"
 TARGET_HOME="${TARGET_HOME:-/root}"
 MOVE_KEY_BIN_FLAG="/root/.key_binary_move_prompt_done"
+SUID_FILE="/root/suid_files.txt"
+SGID_FILE="/root/sgid_files.txt"
+SUID_UNEXPECTED_FILE="/root/suid_unexpected.txt"
+SGID_UNEXPECTED_FILE="/root/sgid_unexpected.txt"
+SUID_ALLOW_FILE="/root/suid_allowlist.txt"
+SGID_ALLOW_FILE="/root/sgid_allowlist.txt"
+SUID_SCAN_PID=""
 
 find_integrity_runner() {
   if command_exists dpkg; then
@@ -109,18 +116,8 @@ show_shell_with_pause() {
   pause_step
 }
 
-scan_suid_guid() {
-  local suid_file="/root/suid_files.txt"
-  local sgid_file="/root/sgid_files.txt"
-  local suid_unexpected_file="/root/suid_unexpected.txt"
-  local sgid_unexpected_file="/root/sgid_unexpected.txt"
-  local suid_allow_file="/root/suid_allowlist.txt"
-  local sgid_allow_file="/root/sgid_allowlist.txt"
-
-  find / -perm -4000 -type f 2>/dev/null | sort -u >"$suid_file"
-  find / -perm -2000 -type f 2>/dev/null | sort -u >"$sgid_file"
-
-  cat >"$suid_allow_file" <<'ALLOWEOF'
+start_suid_guid_scan_bg() {
+  cat >"$SUID_ALLOW_FILE" <<'ALLOWEOF'
 /usr/bin/chfn
 /usr/bin/chsh
 /usr/bin/fusermount
@@ -136,7 +133,7 @@ scan_suid_guid() {
 /usr/lib/openssh/ssh-keysign
 ALLOWEOF
 
-  cat >"$sgid_allow_file" <<'ALLOWSGIDEOF'
+  cat >"$SGID_ALLOW_FILE" <<'ALLOWSGIDEOF'
 /usr/bin/chage
 /usr/bin/crontab
 /usr/bin/expiry
@@ -148,20 +145,38 @@ ALLOWEOF
 /usr/sbin/postqueue
 ALLOWSGIDEOF
 
-  grep -Fxv -f "$suid_allow_file" "$suid_file" >"$suid_unexpected_file" || true
-  grep -Fxv -f "$sgid_allow_file" "$sgid_file" >"$sgid_unexpected_file" || true
+  (
+    find / -perm -4000 -type f 2>/dev/null | sort -u >"$SUID_FILE"
+    find / -perm -2000 -type f 2>/dev/null | sort -u >"$SGID_FILE"
+    grep -Fxv -f "$SUID_ALLOW_FILE" "$SUID_FILE" >"$SUID_UNEXPECTED_FILE" || true
+    grep -Fxv -f "$SGID_ALLOW_FILE" "$SGID_FILE" >"$SGID_UNEXPECTED_FILE" || true
+  ) &
+  SUID_SCAN_PID="$!"
 
-  show_output_source_header "FILE: $suid_unexpected_file (unexpected SUID)"
-  if [[ -s "$suid_unexpected_file" ]]; then
-    cat "$suid_unexpected_file"
+  ok "SUID/SGID scan started in background (PID: $SUID_SCAN_PID)"
+}
+
+show_suid_guid_results() {
+  if [[ -n "$SUID_SCAN_PID" ]]; then
+    if kill -0 "$SUID_SCAN_PID" 2>/dev/null; then
+      info "Waiting for background SUID/SGID scan (PID: $SUID_SCAN_PID) to complete..."
+    fi
+    wait "$SUID_SCAN_PID" || warn "Background SUID/SGID scan reported an error."
+  else
+    warn "No background SUID/SGID scan PID recorded; showing any existing result files."
+  fi
+
+  show_output_source_header "FILE: $SUID_UNEXPECTED_FILE (unexpected SUID)"
+  if [[ -s "$SUID_UNEXPECTED_FILE" ]]; then
+    cat "$SUID_UNEXPECTED_FILE"
   else
     ok "No unexpected SUID entries based on current allowlist."
   fi
   pause_step
 
-  show_output_source_header "FILE: $sgid_unexpected_file (unexpected SGID)"
-  if [[ -s "$sgid_unexpected_file" ]]; then
-    cat "$sgid_unexpected_file"
+  show_output_source_header "FILE: $SGID_UNEXPECTED_FILE (unexpected SGID)"
+  if [[ -s "$SGID_UNEXPECTED_FILE" ]]; then
+    cat "$SGID_UNEXPECTED_FILE"
   else
     ok "No unexpected SGID entries based on current allowlist."
   fi
@@ -333,8 +348,10 @@ if save_installed_packages /root/installed_apps.txt; then
 fi
 pause_step
 
-section_header "12) Find Files with SUID/SGID"
-scan_suid_guid
+section_header "12) Start SUID/SGID Scan in Background"
+start_suid_guid_scan_bg
+info "Results will be shown near the end of Section 1."
+pause_step
 
 section_header "13) Validate File Integrity in Background"
 start_integrity_check || true
@@ -396,7 +413,10 @@ else
   pause_step
 fi
 
-section_header "19) Change Root Password"
+section_header "19) Review Background SUID/SGID Results"
+show_suid_guid_results
+
+section_header "20) Change Root Password"
 if ask_yes_no "Run 'passwd root' now?" "Y"; then
   passwd root
 else
@@ -404,7 +424,7 @@ else
 fi
 pause_step
 
-section_header "20) Add Root SSH Public Key"
+section_header "21) Add Root SSH Public Key"
 read -r -p "Paste the public key to append to /root/.ssh/authorized_keys (blank to skip): " root_pubkey
 if [[ -n "$root_pubkey" ]]; then
   mkdir -p /root/.ssh
@@ -433,11 +453,11 @@ else
 fi
 pause_step
 
-section_header "21) Manual Validation Prompt"
+section_header "22) Manual Validation Prompt"
 info "Test SSH connectivity in a separate terminal now before continuing."
 pause_step
 
-section_header "22) Move Key Binaries (High-Risk)"
+section_header "23) Move Key Binaries (High-Risk)"
 warn "Moving sudo/chattr can lock out normal administration paths."
 if [[ -f "$MOVE_KEY_BIN_FLAG" ]]; then
   info "Move prompt has already been answered once on this host. Skipping."
@@ -464,7 +484,7 @@ fi
 touch "$MOVE_KEY_BIN_FLAG"
 pause_step
 
-section_header "23) Cleanup Enumeration Artifacts from /root"
+section_header "24) Cleanup Enumeration Artifacts from /root"
 rm -f /root/suid_files.txt /root/sgid_files.txt /root/suid_unexpected.txt /root/sgid_unexpected.txt
 rm -f /root/suid_allowlist.txt /root/sgid_allowlist.txt
 rm -f /root/world_writable_files.txt /root/world_writable_dirs_no_sticky.txt
