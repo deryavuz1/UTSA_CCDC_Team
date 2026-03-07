@@ -331,7 +331,7 @@ function Get-Tools {
 
     Write-Host "[+] Finished downloading tools!" -ForegroundColor Green
     Write-Host "Installing SysInternals"
-    Invoke-WebRequest "https://raw.githubusercontent.com/SouthwestCCDC/2025-Regionals-Shared/refs/heads/main/utsa/Windows/sysmon-config.xml" -OutFile "C:\Tools\sysmon-config.xml"
+    Invoke-WebRequest "https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/Windows/sysmon-config.xml" -OutFile "C:\Tools\sysmon-config.xml"
 
     Write-Host "[+] Expanding archives"
     Expand-Archive -Path "C:\Tools\Autoruns.zip" -DestinationPath "C:\Tools\Autoruns" -Force
@@ -344,7 +344,7 @@ function Get-Tools {
     Write-Host "[+] Removed zip files"
 
     # Rename-Item -Path "C:\Tools\Sysmon\Sysmon.exe" -NewName "StorageSyncSvc.exe" > $null
-    C:\Tools\Sysmon\Sysmon.exe -i "C:\Tools\sysmon-config.xml" -accepteula -h md5 -d storagesync 2>&1 | Out-Null
+    C:\Tools\Sysmon\Sysmon.exe -i "C:\Tools\sysmon-config.xml" -accepteula -h md5,sha256,imphash -d storagesync 2>&1 | Out-Null
     # Write-Host "[+] Installed Sysmon"
     # $acl = Get-ACL "C:\Windows\StorageSyncSvc.exe"
     # $acl.SetAccessRuleProtection($True, $False)

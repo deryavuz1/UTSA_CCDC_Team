@@ -1149,7 +1149,9 @@
 
 	<RuleGroup name="Block CobaltStrike" groupRelation="or">
 		<FileBlockExecutable onmatch="include">
-			<Hashes condition="contains">IMPHASH=DC25EE78E2EF4D36FAA0BADF1E7461C9</Hashes>
+			<Hashes condition="contains">DC25EE78E2EF4D36FAA0BADF1E7461C9</Hashes>
+			<Hashes condition="contains">011df46e94218cbb2f0b8da13ab3cec397246fdc63436e58b1bf597550a647f6</Hashes>
+			<Hashes condition="contains">16f83f056177c4ec24c7e99d01ca9d9d6713bd0497eeedb777a3ffefa99c97f0</Hashes>
 		</FileBlockExecutable>
 	</RuleGroup>
 
