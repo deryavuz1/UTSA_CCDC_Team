@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RECIP="blackteam@imperial.swccdc.com"
+HOST="$(hostname -f 2>/dev/null || hostname)"
+
+is_admin_user() {
+  local u="$1"
+  # true if user exists AND is in sudo or wheel
+  id "$u" &>/dev/null || return 1
+  id -nG "$u" 2>/dev/null | tr ' ' '\n' | grep -qxE '(sudo|wheel)'
+}
+
+send_alert() {
+  local class="$1"   # Root|Admin
+  local result="$2"  # Successful|Unsuccessful
+  local user="$3"
+  local ip="$4"
+
+  local msg="Attempted ${class} Login: ${result} for ${user}@${HOST} IP=${ip}"
+  printf "%s\n" "$msg" | /usr/bin/mail -s "$msg" "$RECIP"
+}
+
+# Parse a best-effort IP field from typical auth log patterns
+extract_ip() {
+  # expects full log line on stdin
+  # matches: "from 1.2.3.4", "rhost=1.2.3.4", "REMOTE_HOST=1.2.3.4"
+  sed -nE \
+    -e 's/.* from ([0-9a-fA-F:.]+).*/\1/p' \
+    -e 's/.*rhost=([0-9a-fA-F:.]+).*/\1/p' \
+    -e 's/.*REMOTE_HOST=([0-9a-fA-F:.]+).*/\1/p' \
+  | head -n1
+}
+
+# Stream relevant auth events (sshd + sudo + su). Works on most systemd-based distros.
+journalctl -f -o cat -t sshd -t sudo -t su 2>/dev/null | while IFS= read -r line; do
+  ip="$(printf '%s\n' "$line" | extract_ip)"
+  [[ -n "${ip:-}" ]] || ip="N/A"
+
+  # ---- SSHD root attempts ----
+  # Successful: "Accepted ... for root from <ip>"
+  if [[ "$line" =~ Accepted[[:space:]].*for[[:space:]]root[[:space:]]from[[:space:]] ]]; then
+    send_alert "Root" "Successful" "root" "$ip"
+    continue
+  fi
+
+  # Unsuccessful: "Failed ... for root from <ip>"
+  if [[ "$line" =~ Failed[[:space:]].*for[[:space:]]root[[:space:]]from[[:space:]] ]]; then
+    send_alert "Root" "Unsuccessful" "root" "$ip"
+    continue
+  fi
+
+  # Invalid user root attempts sometimes appear as: "Invalid user root from <ip>"
+  if [[ "$line" =~ Invalid[[:space:]]user[[:space:]]root[[:space:]]from[[:space:]] ]]; then
+    send_alert "Root" "Unsuccessful" "root" "$ip"
+    continue
+  fi
+
+  # ---- SSHD admin (sudo/wheel) attempts ----
+  # Successful: "Accepted ... for <user> from <ip>"
+  if [[ "$line" =~ Accepted[[:space:]].*for[[:space:]]([a-zA-Z0-9._-]+)[[:space:]]from[[:space:]] ]]; then
+    u="${BASH_REMATCH[1]}"
+    if is_admin_user "$u"; then
+      send_alert "Admin" "Successful" "$u" "$ip"
+    fi
+    continue
+  fi
+
+  # Unsuccessful: "Failed ... for <user> from <ip>" OR "Failed ... for invalid user <user> from <ip>"
+  if [[ "$line" =~ Failed[[:space:]].*for([[:space:]]invalid[[:space:]]user)?[[:space:]]([a-zA-Z0-9._-]+)[[:space:]]from[[:space:]] ]]; then
+    u="${BASH_REMATCH[2]}"
+    if is_admin_user "$u"; then
+      send_alert "Admin" "Unsuccessful" "$u" "$ip"
+    fi
+    continue
+  fi
+
+  # ---- sudo attempts (admin auth to elevate) ----
+  # Successful sudo usually logs: "sudo:  user : ... ; COMMAND=..."
+  if [[ "$line" =~ ^sudo:\ +([a-zA-Z0-9._-]+)\ : ]]; then
+    u="${BASH_REMATCH[1]}"
+    if is_admin_user "$u"; then
+      send_alert "Admin" "Successful" "$u" "LOCAL"
+    fi
+    continue
+  fi
+
+  # Failed sudo auth: "sudo: pam_unix(sudo:auth): authentication failure; ... user=<user>"
+  if [[ "$line" =~ pam_unix\(sudo:auth\):\ authentication\ failure.*user=([a-zA-Z0-9._-]+) ]]; then
+    u="${BASH_REMATCH[1]}"
+    if is_admin_user "$u"; then
+      send_alert "Admin" "Unsuccessful" "$u" "LOCAL"
+    fi
+    continue
+  fi
+
+  # ---- su attempts (root/admin switching) ----
+  # Failed su auth: "su: pam_unix(su:auth): authentication failure; ... user=<user>"
+  if [[ "$line" =~ pam_unix\(su:auth\):\ authentication\ failure.*user=([a-zA-Z0-9._-]+) ]]; then
+    u="${BASH_REMATCH[1]}"
+    # This is an admin-relevant attempt if the initiating user is admin OR target is root is implied.
+    if is_admin_user "$u"; then
+      send_alert "Admin" "Unsuccessful" "$u" "LOCAL"
+    fi
+    continue
+  fi
+
+done
+
+chmod 0750 /usr/local/sbin/auth_admin_root_alert.sh
+chown root:root /usr/local/sbin/auth_admin_root_alert.sh
+
+
+[Unit]
+Description=Email alerts for root/admin login attempts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/auth_admin_root_alert.sh
+Restart=always
+RestartSec=2
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
+
+systemctl daemon-reload
+systemctl enable --now auth-admin-root-alert.service
