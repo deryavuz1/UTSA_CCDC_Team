@@ -1255,6 +1255,11 @@
 				<TargetFilename condition="begin with">C:\Windows\</TargetFilename>
 			</Rule>
 		</FileBlockExecutable>
+		<FileBlockExecutable onmatch="exclude">
+			<!--Allow Graylog processes and files-->
+			<Image condition="contains">graylog</Image>
+			<TargetFilename condition="contains">graylog</TargetFilename>
+		</FileBlockExecutable>
 	</RuleGroup>
 	</EventFiltering>
 </Sysmon>
