@@ -184,14 +184,32 @@ function Get-Binary {
     Write-Host "[+] Adding Defender exclusion for C:\Tools" -ForegroundColor Cyan
     Add-MpPreference -ExclusionPath "C:\Tools"
 
-    Write-Host "[+] Downloading Cable"
-    Invoke-WebRequest "https://github.com/logangoins/Cable/releases/download/1.1/Cable.exe" -OutFile "C:\Tools\Cable.exe"
-    Write-Host "[+] Downloading PingCastle"
-    Invoke-WebRequest "https://github.com/netwrix/pingcastle/releases/download/3.5.0.44/PingCastle_3.5.0.44.zip" -OutFile "C:\Tools\pingcastle.zip"
-    Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force
-    Remove-Item "C:\Tools\pingcastle.zip"
-    Write-Host "[+] Downloading Certify"
-    Invoke-WebRequest "https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/Certify.exe" -OutFile "C:\Tools\Certify.exe"
+    Write-Host "[+] Downloading binaries in parallel..." -ForegroundColor Cyan
+    $downloads = @(
+        @{ Name = "Cable";      Url = "https://github.com/logangoins/Cable/releases/download/1.1/Cable.exe";                              Out = "C:\Tools\Cable.exe" }
+        @{ Name = "PingCastle"; Url = "https://github.com/netwrix/pingcastle/releases/download/3.5.0.44/PingCastle_3.5.0.44.zip";          Out = "C:\Tools\pingcastle.zip" }
+        @{ Name = "Certify";    Url = "https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/Certify.exe";                Out = "C:\Tools\Certify.exe" }
+    )
+
+    $jobs = @()
+    foreach ($dl in $downloads) {
+        Write-Host "  [>] Starting download: $($dl.Name)"
+        $jobs += Start-Job -ScriptBlock { param($url, $out) Invoke-WebRequest $url -OutFile $out } -ArgumentList $dl.Url, $dl.Out
+    }
+
+    Wait-Job $jobs | Out-Null
+    foreach ($j in $jobs) {
+        if ($j.State -eq 'Failed') {
+            Write-Host "  [!] Download job failed: $($j.ChildJobs[0].JobStateInfo.Reason)" -ForegroundColor Red
+        }
+        Remove-Job $j
+    }
+
+    # Post-processing: extract PingCastle
+    if (Test-Path "C:\Tools\pingcastle.zip") {
+        Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force
+        Remove-Item "C:\Tools\pingcastle.zip"
+    }
 
     Write-Host "[+] All binaries downloaded!" -ForegroundColor Green
 }
@@ -379,6 +397,17 @@ function Reset-AllUserPasswords {
     Write-Host "Passwords are saved at: $csvPath" -ForegroundColor Green
 }
 
+function Get-SystemInformer {
+    Write-Host "[+] Downloading System Informer..." -ForegroundColor Cyan
+    try {
+        Invoke-WebRequest "https://phoenixnap.dl.sourceforge.net/project/systeminformer/systeminformer-3.2.25011-release-setup.exe?viasf=1" -OutFile "C:\Tools\SystemInformer.exe" -ErrorAction Stop
+        Write-Host "[+] Downloaded System Informer to C:\Tools\SystemInformer.exe" -ForegroundColor Green
+        Write-Host "[+] Run C:\Tools\SystemInformer.exe to install" -ForegroundColor Cyan
+    } catch {
+        Write-Host "[!] Failed to download System Informer: $_" -ForegroundColor Red
+    }
+}
+
 
 function Get-Tools {
     New-Item -Path C:\ -Name "Tools" -ItemType Directory -Force > $null
@@ -394,24 +423,46 @@ function Get-Tools {
     Set-Acl -Path "C:\Tools" -AclObject $acl
     Write-Host "[+] Locked down C:\Tools - Administrators and SYSTEM only" -ForegroundColor Cyan
 
-    Write-Host "[+] Collecting tools..."
-    Write-Host "[+] Downloading SystemInformer"
-    Invoke-WebRequest https://phoenixnap.dl.sourceforge.net/project/systeminformer/systeminformer-3.2.25011-release-setup.exe?viasf=1 -OutFile "C:\Tools\SystemInformer.exe"
-    Write-Host "[+] Downloading Autoruns"
-    Invoke-WebRequest https://download.sysinternals.com/files/Autoruns.zip -OutFile "C:\Tools\Autoruns.zip"
-    Write-Host "[+] Downloading Sysmon"
-    Invoke-WebRequest https://download.sysinternals.com/files/Sysmon.zip -OutFile "C:\Tools\Sysmon.zip"
-    Write-Host "[+] Downloading Firefox"
-    Invoke-WebRequest "https://download.mozilla.org/?product=firefox-stub&os=win&lang=en-US" -OutFile "C:\Tools\FirefoxInstaller.exe"
-    Write-Host "[+] Downloading LDAP Firewall"
-    Invoke-WebRequest https://github.com/zeronetworks/ldapfw/releases/download/v1.0.0/ldapfw_v1.0.0-x64.zip -OutFile "C:\Tools\ldapfw.zip"
-    Write-Host "[+] Downloading Account Lockout Tools"
-    Invoke-WebRequest "https://download.microsoft.com/download/1/f/0/1f0e9569-3350-4329-b443-822976f29284/ALTools.exe" -OutFile "C:\Tools\ALTools.exe"
-    Invoke-WebRequest "https://github.com/deryavuz1/UTSA_CCDC_Team/raw/refs/heads/main/Windows/sysmonmsix.exe" -OutFile "C:\Tools\sysint.exe"
+    Write-Host "[+] Downloading all tools in parallel..." -ForegroundColor Cyan
 
-    Write-Host "[+] Finished downloading tools!" -ForegroundColor Green
-    Write-Host "Installing SysInternals"
-    Invoke-WebRequest "https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/Windows/sysmon-config.xml" -OutFile "C:\Tools\sysmon-config.xml"
+    # Check for sysmon-config.xml next to the script before downloading
+    $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
+    $localSysmonConfig = Join-Path $scriptDir "sysmon-config.xml"
+
+    $downloads = @(
+        @{ Name = "Autoruns";       Url = "https://download.sysinternals.com/files/Autoruns.zip";                                                              Out = "C:\Tools\Autoruns.zip" }
+        @{ Name = "Sysmon";         Url = "https://download.sysinternals.com/files/Sysmon.zip";                                                                Out = "C:\Tools\Sysmon.zip" }
+        @{ Name = "Firefox";        Url = "https://download.mozilla.org/?product=firefox-stub&os=win&lang=en-US";                                              Out = "C:\Tools\FirefoxInstaller.exe" }
+        @{ Name = "LDAP Firewall";  Url = "https://github.com/zeronetworks/ldapfw/releases/download/v1.0.0/ldapfw_v1.0.0-x64.zip";                            Out = "C:\Tools\ldapfw.zip" }
+        @{ Name = "ALTools";        Url = "https://download.microsoft.com/download/1/f/0/1f0e9569-3350-4329-b443-822976f29284/ALTools.exe";                    Out = "C:\Tools\ALTools.exe" }
+    )
+
+    # Only download sysmon-config if not found locally
+    if (Test-Path $localSysmonConfig) {
+        Write-Host "  [+] Found sysmon-config.xml locally at $localSysmonConfig - copying" -ForegroundColor Green
+        Copy-Item $localSysmonConfig "C:\Tools\sysmon-config.xml" -Force
+    } else {
+        Write-Host "  [~] sysmon-config.xml not found locally - will download" -ForegroundColor Yellow
+        $downloads += @{ Name = "Sysmon Config"; Url = "https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/Windows/sysmon-config.xml"; Out = "C:\Tools\sysmon-config.xml" }
+    }
+
+    $jobs = @()
+    foreach ($dl in $downloads) {
+        Write-Host "  [>] Starting download: $($dl.Name)"
+        $jobs += Start-Job -ScriptBlock { param($url, $out) Invoke-WebRequest $url -OutFile $out } -ArgumentList $dl.Url, $dl.Out
+    }
+
+    Write-Host "[+] Waiting for all downloads to complete..." -ForegroundColor Cyan
+    Wait-Job $jobs | Out-Null
+    $failCount = 0
+    foreach ($j in $jobs) {
+        if ($j.State -eq 'Failed') {
+            Write-Host "  [!] Download failed: $($j.ChildJobs[0].JobStateInfo.Reason)" -ForegroundColor Red
+            $failCount++
+        }
+        Remove-Job $j
+    }
+    Write-Host "[+] Downloads finished ($failCount failure(s))" -ForegroundColor Green
 
     Write-Host "[+] Expanding archives"
     Expand-Archive -Path "C:\Tools\Autoruns.zip" -DestinationPath "C:\Tools\Autoruns" -Force
@@ -770,10 +821,11 @@ function Generate-WDAC {
     }
 
     Write-Host "[+] Generating policy..."
-    $pf64 = Start-Job -ScriptBlock { param($pf64Policy) New-CIPolicy -FilePath $pf64Policy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\Program Files\" -UserPEs -OmitPaths "C:\Program Files\WindowsApps\" } -ArgumentList $pf64Policy
-    $pf32 = Start-Job -ScriptBlock { param($pf32Policy) New-CIPolicy -FilePath $pf32Policy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\Program Files (x86)\" -UserPEs } -ArgumentList $pf32Policy
-    $pd = Start-Job -ScriptBlock { param($pdPolicy) New-CIPolicy -FilePath $pdPolicy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\ProgramData\" -UserPEs } -ArgumentList $pdPolicy
-    $tools = Start-Job -ScriptBlock { param($toolsPolicy) New-CIPolicy -FilePath $toolsPolicy -Level FilePublisher -Fallback Hash -ScanPath "C:\Tools\" -UserPEs } -ArgumentList $toolsPolicy
+    $scanStart = Get-Date
+    $pf64 = Start-Job -Name "pf64 (Program Files)" -ScriptBlock { param($pf64Policy) New-CIPolicy -FilePath $pf64Policy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\Program Files\" -UserPEs -OmitPaths "C:\Program Files\WindowsApps\" } -ArgumentList $pf64Policy
+    $pf32 = Start-Job -Name "pf32 (Program Files x86)" -ScriptBlock { param($pf32Policy) New-CIPolicy -FilePath $pf32Policy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\Program Files (x86)\" -UserPEs } -ArgumentList $pf32Policy
+    $pd = Start-Job -Name "pd (ProgramData)" -ScriptBlock { param($pdPolicy) New-CIPolicy -FilePath $pdPolicy -Level FilePublisher -Fallback Hash,FileName -ScanPath "C:\ProgramData\" -UserPEs } -ArgumentList $pdPolicy
+    $tools = Start-Job -Name "tools (C:\Tools)" -ScriptBlock { param($toolsPolicy) New-CIPolicy -FilePath $toolsPolicy -Level FilePublisher -Fallback Hash -ScanPath "C:\Tools\" -UserPEs } -ArgumentList $toolsPolicy
 
     # Detect IIS - use Get-WindowsFeature on Server, fall back to path check on workstations
     $iisDetected = $false
@@ -785,12 +837,51 @@ function Generate-WDAC {
     }
     if ($iisDetected) {
         Write-Host "[!] Detected an IIS Server! Adjusting WDAC policy creation..." -ForegroundColor Yellow
-        $iis = Start-Job -ScriptBlock { param($IISPolicy) New-CIPolicy -FilePath $IISPolicy -Level FilePublisher -Fallback Hash,Filename -ScanPath "C:\Windows\System32\inetsrv\" } -ArgumentList $IISPolicy
+        $iis = Start-Job -Name "iis (inetsrv)" -ScriptBlock { param($IISPolicy) New-CIPolicy -FilePath $IISPolicy -Level FilePublisher -Fallback Hash,Filename -ScanPath "C:\Windows\System32\inetsrv\" } -ArgumentList $IISPolicy
     }
-    $drivers = Start-Job -ScriptBlock { param($DriversPolicy) New-CIPolicy -FilePath $DriversPolicy -Level SignedVersion -Fallback FilePublisher,Hash -ScanPath "C:\Windows\System32\drivers\" } -ArgumentList $DriversPolicy
-    
-    Wait-Job $pf64,$pf32,$pd,$drivers,$tools
-    if ($iis) { Wait-Job $iis ; Remove-Job $iis }
+    $drivers = Start-Job -Name "drivers (System32\drivers)" -ScriptBlock { param($DriversPolicy) New-CIPolicy -FilePath $DriversPolicy -Level SignedVersion -Fallback FilePublisher,Hash -ScanPath "C:\Windows\System32\drivers\" } -ArgumentList $DriversPolicy
+
+    # Build the full job list for progress monitoring
+    $allScanJobs = @($pf64, $pf32, $pd, $tools, $drivers)
+    if ($iis) { $allScanJobs += $iis }
+    $completedNames = @{}
+
+    Write-Host "[+] Waiting for $($allScanJobs.Count) scan jobs to complete..." -ForegroundColor Cyan
+    while ($allScanJobs | Where-Object { $_.State -eq 'Running' }) {
+        foreach ($j in $allScanJobs) {
+            if ($j.State -ne 'Running' -and -not $completedNames.ContainsKey($j.Id)) {
+                $elapsed = "{0:mm\:ss}" -f ((Get-Date) - $scanStart)
+                if ($j.State -eq 'Completed') {
+                    Write-Host "  [+] $($j.Name) complete ($elapsed)" -ForegroundColor Green
+                } else {
+                    Write-Host "  [!] $($j.Name) $($j.State) ($elapsed)" -ForegroundColor Red
+                }
+                $completedNames[$j.Id] = $true
+            }
+        }
+        $running = ($allScanJobs | Where-Object { $_.State -eq 'Running' }).Count
+        if ($running -gt 0) {
+            $elapsed = "{0:mm\:ss}" -f ((Get-Date) - $scanStart)
+            $runningNames = ($allScanJobs | Where-Object { $_.State -eq 'Running' } | ForEach-Object { $_.Name }) -join ', '
+            Write-Host "  [~] $elapsed elapsed - still waiting on $running job(s): $runningNames" -ForegroundColor DarkGray
+            Start-Sleep -Seconds 15
+        }
+    }
+    # Print any final completions not yet reported
+    foreach ($j in $allScanJobs) {
+        if (-not $completedNames.ContainsKey($j.Id)) {
+            $elapsed = "{0:mm\:ss}" -f ((Get-Date) - $scanStart)
+            if ($j.State -eq 'Completed') {
+                Write-Host "  [+] $($j.Name) complete ($elapsed)" -ForegroundColor Green
+            } else {
+                Write-Host "  [!] $($j.Name) $($j.State) ($elapsed)" -ForegroundColor Red
+            }
+        }
+    }
+    $totalElapsed = "{0:mm\:ss}" -f ((Get-Date) - $scanStart)
+    Write-Host "[+] All scans finished in $totalElapsed" -ForegroundColor Green
+
+    if ($iis) { Remove-Job $iis }
 
     # Check for job failures before continuing
     $failedJobs = @()
@@ -925,6 +1016,13 @@ function win-ccdc {
     Write-Host "============================================" -ForegroundColor Magenta
     Get-Tools
 
+    $installSI = Read-Host -Prompt "Do you want to download System Informer? (yes/no)"
+    if ($installSI -eq "yes") {
+        Get-SystemInformer
+    } else {
+        Write-Host "[*] Skipping System Informer" -ForegroundColor Yellow
+    }
+
     # ========================
     # Step 3: DC-only tasks
     # ========================
@@ -955,7 +1053,7 @@ function win-ccdc {
         $cableExe = "C:\Tools\Cable.exe"
         $cableOutput = Join-Path $desktopPath "Cable_DACL_$timestamp.txt"
         if (Test-Path $cableExe) {
-            & $cableExe /dacl find | Tee-Object -FilePath $cableOutput
+            & $cableExe dacl \find | Tee-Object -FilePath $cableOutput
             Write-Host "[+] Cable DACL output saved to: $cableOutput" -ForegroundColor Green
         } else {
             Write-Host "[!] Cable.exe not found at $cableExe" -ForegroundColor Red
