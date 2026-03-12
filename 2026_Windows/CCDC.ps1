@@ -933,7 +933,6 @@ function Generate-WDAC {
     # Options 14 (ISG) and 19 (Dynamic Code Security) require Server 2019+ / Win10 1903+
     $osBuild = [System.Environment]::OSVersion.Version.Build
     if ($osBuild -ge 17763) {
-        Set-RuleOption -FilePath $Policy -Option 14     # Intelligent Security Graph
         Set-RuleOption -FilePath $Policy -Option 19     # Dynamic Code Security
     } else {
         Write-Host "[!] Skipping options 14 and 19 - not supported on this OS (build $osBuild)" -ForegroundColor Yellow
