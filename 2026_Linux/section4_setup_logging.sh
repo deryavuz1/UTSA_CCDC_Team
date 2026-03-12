@@ -77,7 +77,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/root
-ExecStart=/bin/bash -lc 'exec /root/pspy64 -f -c -r /etc -r /home -r /media -r /mnt -r /opt -r /root -r /tmp -r /usr -r /var | grep -vF -f /root/pspy.exclude'
+ExecStart=/bin/bash -lc 'exec /root/pspy64 -f -c -r /etc -r /home -r /media -r /mnt -r /opt -r /root -r /tmp -r /usr -r /var -r /srv | grep -vF -f /root/pspy.exclude'
 StandardOutput=append:/root/pspy.log
 StandardError=append:/root/pspy.log
 Restart=always
