@@ -175,14 +175,21 @@ Function Get-RegistryKeys {
     $runKey.GetValueNames() | ForEach-Object { [PSCustomObject]@{ Name = $_; Value = $runKey.GetValue($_) } } | Out-Host
 }
 
-function Get-Cable {
-    Invoke-WebRequest "https://go.microsoft.com/fwlink/?linkid=874338" -OutFile "C:\Tools\dotnet472.exe"
-    C:\Tools\dotnet472.exe /quiet /norestart
-    Invoke-WebRequest "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.103/dotnet-sdk-10.0.103-win-x64.exe" -OutFile "C:\Tools\dotnet10.exe"
-    C:\Tools\dotnet10.exe /quiet /norestart
+function Get-Binary {
+    # Add Defender exclusion for C:\Tools so binaries don't get quarantined
+    Write-Host "[+] Adding Defender exclusion for C:\Tools" -ForegroundColor Cyan
+    Add-MpPreference -ExclusionPath "C:\Tools"
+
     Write-Host "[+] Downloading Cable"
-    Invoke-WebRequest "https://github.com/logangoins/Cable/archive/refs/heads/main.zip" -OutFile "C:\Tools\Cable.zip"  # FIX: moved -OutFile outside the URL string
-    Invoke-WebRequest "https://github.com/GhostPack/Certify/archive/refs/heads/main.zip" -OutFile "C:\Tools\Certify.zip"
+    Invoke-WebRequest "https://github.com/logangoins/Cable/releases/download/1.1/Cable.exe" -OutFile "C:\Tools\Cable.exe"
+    Write-Host "[+] Downloading PingCastle"
+    Invoke-WebRequest "https://github.com/netwrix/pingcastle/releases/download/3.5.0.44/PingCastle_3.5.0.44.zip" -OutFile "C:\Tools\pingcastle.zip"
+    Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force
+    Remove-Item "C:\Tools\pingcastle.zip"
+    Write-Host "[+] Downloading Certify"
+    Invoke-WebRequest "https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/Certify.exe" -OutFile "C:\Tools\Certify.exe"
+
+    Write-Host "[+] All binaries downloaded!" -ForegroundColor Green
 }
 
 function Reset-AllUserPasswords {
@@ -304,14 +311,20 @@ function Reset-AllUserPasswords {
     Write-Host "Passwords are saved at: $csvPath" -ForegroundColor Green
 }
 
-function Get-PingCastle {
-    Invoke-WebRequest "https://github.com/netwrix/pingcastle/releases/download/3.5.0.37/PingCastle_3.5.0.37.zip" -OutFile "C:\Tools\pingcastle.zip"
-    Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force
-}
 
 function Get-Tools {
     New-Item -Path C:\ -Name "Tools" -ItemType Directory -Force > $null
     Write-Host "[+] Created tools directory!"
+
+    # Lock down C:\Tools - only Administrators and SYSTEM can access
+    $acl = New-Object System.Security.AccessControl.DirectorySecurity
+    $acl.SetAccessRuleProtection($true, $false)  # Disable inheritance, remove inherited rules
+    $adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+    $systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule("NT AUTHORITY\SYSTEM", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+    $acl.AddAccessRule($adminRule)
+    $acl.AddAccessRule($systemRule)
+    Set-Acl -Path "C:\Tools" -AclObject $acl
+    Write-Host "[+] Locked down C:\Tools - Administrators and SYSTEM only" -ForegroundColor Cyan
 
     Write-Host "[+] Collecting tools..."
     Write-Host "[+] Downloading SystemInformer"
