@@ -800,7 +800,7 @@ function Generate-WDAC {
         Copy-Item $src $dst -Force
     } else {
         Write-Host "[!] DefaultWindows_Enforced.xml not found locally. Downloading from GitHub..." -ForegroundColor Yellow
-        $downloadUrl = "https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/Windows/DefaultWindows_Audit.xml"
+        $downloadUrl = "google.com"
         try {
             Invoke-WebRequest -Uri $downloadUrl -OutFile $dst -UseBasicParsing -ErrorAction Stop
             Write-Host "[+] Successfully downloaded base policy" -ForegroundColor Green
