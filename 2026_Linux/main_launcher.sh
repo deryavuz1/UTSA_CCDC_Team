@@ -20,7 +20,7 @@ else
 fi
 
 # Placeholder links. Override with environment variables before running.
-BASE="https://raw.githubusercontent.com/SouthwestCCDC/2026-Regionals-Shared/main/The%20University%20of%20Texas%20at%20San%20Antonio/Linux"
+BASE="https://raw.githubusercontent.com/SouthwestCCDC/2026-Regionals-Shared/main/The%20University%20of%20Texas%20at%20San%20Antonio/2026_Linux"
 
 SECTION1_URL="${SECTION1_URL:-$BASE/section1_enumeration.sh}"
 SECTION2_URL="${SECTION2_URL:-$BASE/section2_initial_hardening.sh}"
