@@ -443,8 +443,9 @@ function Get-Tools {
         Copy-Item $localSysmonConfig "C:\Tools\sysmon-config.xml" -Force
     } else {
         Write-Host "  [~] sysmon-config.xml not found locally - will download" -ForegroundColor Yellow
-        $downloads += @{ Name = "Sysmon Config"; Url = "https://raw.githubusercontent.com/SouthwestCCDC/2026-Regionals-Shared/tree/main/The%20University%20of%20Texas%20at%20San%20Antonio/refs/heads/main/Windows/sysmon-config.xml"; Out = "C:\Tools\sysmon-config.xml" }
+        $downloads += @{ Name = "Sysmon Config"; Url = "https://raw.githubusercontent.com/SouthwestCCDC/2026-Regionals-Shared/tree/main/The%20University%20of%20Texas%20at%20San%20Antonio/refs/heads/main/2026_Windows/sysmon-config.xml"; Out = "C:\Tools\sysmon-config.xml" }
     }
+
     $jobs = @()
     foreach ($dl in $downloads) {
         Write-Host "  [>] Starting download: $($dl.Name)"
@@ -670,18 +671,18 @@ function Guest-Service {
     # Prompt for password input for the Guest account
     $password = Read-Host -AsSecureString "Enter the password for the $username account"
 
-    # Convert the secure password to plain text for WMI interaction
+    # Convert the secure password to plain text for CIM interaction
     $passwordPlainText = [System.Net.NetworkCredential]::new('', $password).Password
 
     # Prompt for the service name
     $serviceName = Read-Host "Enter the service name to manage"
 
-    # Use WMI to get the service object
-    $service = Get-WmiObject -Class Win32_Service -Filter "Name = '$serviceName'"
+    # Use CIM to get the service object
+    $service = Get-CimInstance -ClassName Win32_Service -Filter "Name = '$serviceName'"
 
     if ($service) {
-        # Change the service credentials using WMI
-        $service.change($null, $null, $null, $null, $null, $null, $username, $passwordPlainText) > $null
+        # Change the service credentials using CIM
+        Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{ StartName = $username; StartPassword = $passwordPlainText } > $null
 
         # Restart the service
         Restart-Service -Name $serviceName -Force # this will fail if u put random creds and its ok
@@ -799,7 +800,7 @@ function Generate-WDAC {
         Copy-Item $src $dst -Force
     } else {
         Write-Host "[!] DefaultWindows_Enforced.xml not found locally. Downloading from GitHub..." -ForegroundColor Yellow
-        $downloadUrl = "https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/2026_Windows/DefaultWindows_Audit.xml"
+        $downloadUrl = "https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/Windows/DefaultWindows_Audit.xml"
         try {
             Invoke-WebRequest -Uri $downloadUrl -OutFile $dst -UseBasicParsing -ErrorAction Stop
             Write-Host "[+] Successfully downloaded base policy" -ForegroundColor Green
@@ -841,41 +842,35 @@ function Generate-WDAC {
     $drivers = Start-Job -Name "drivers (System32\drivers)" -ScriptBlock { param($DriversPolicy) New-CIPolicy -FilePath $DriversPolicy -Level SignedVersion -Fallback FilePublisher,Hash -ScanPath "C:\Windows\System32\drivers\" } -ArgumentList $DriversPolicy
 
     # Build the full job list for progress monitoring
-    $allScanJobs = @($pf64, $pf32, $pd, $tools, $drivers)
-    if ($iis) { $allScanJobs += $iis }
-    $completedNames = @{}
+    $jobIds = @($pf64.Id, $pf32.Id, $pd.Id, $tools.Id, $drivers.Id)
+    $jobNames = @{ $pf64.Id = $pf64.Name; $pf32.Id = $pf32.Name; $pd.Id = $pd.Name; $tools.Id = $tools.Name; $drivers.Id = $drivers.Name }
+    if ($iis) { $jobIds += $iis.Id; $jobNames[$iis.Id] = $iis.Name }
+    $completedIds = @{}
 
-    Write-Host "[+] Waiting for $($allScanJobs.Count) scan jobs to complete..." -ForegroundColor Cyan
-    while ($allScanJobs | Where-Object { $_.State -eq 'Running' }) {
-        foreach ($j in $allScanJobs) {
-            if ($j.State -ne 'Running' -and -not $completedNames.ContainsKey($j.Id)) {
+    Write-Host "[+] Waiting for $($jobIds.Count) scan jobs to complete..." -ForegroundColor Cyan
+    while ($true) {
+        # Force fresh state read via Get-Job
+        $freshJobs = $jobIds | ForEach-Object { Get-Job -Id $_ }
+        $stillRunning = $freshJobs | Where-Object { $_.State -eq 'Running' }
+
+        foreach ($fj in $freshJobs) {
+            if ($fj.State -ne 'Running' -and -not $completedIds.ContainsKey($fj.Id)) {
                 $elapsed = "{0:mm\:ss}" -f ((Get-Date) - $scanStart)
-                if ($j.State -eq 'Completed') {
-                    Write-Host "  [+] $($j.Name) complete ($elapsed)" -ForegroundColor Green
+                if ($fj.State -eq 'Completed') {
+                    Write-Host "  [+] $($jobNames[$fj.Id]) complete ($elapsed)" -ForegroundColor Green
                 } else {
-                    Write-Host "  [!] $($j.Name) $($j.State) ($elapsed)" -ForegroundColor Red
+                    Write-Host "  [!] $($jobNames[$fj.Id]) $($fj.State) ($elapsed)" -ForegroundColor Red
                 }
-                $completedNames[$j.Id] = $true
+                $completedIds[$fj.Id] = $true
             }
         }
-        $running = ($allScanJobs | Where-Object { $_.State -eq 'Running' }).Count
-        if ($running -gt 0) {
-            $elapsed = "{0:mm\:ss}" -f ((Get-Date) - $scanStart)
-            $runningNames = ($allScanJobs | Where-Object { $_.State -eq 'Running' } | ForEach-Object { $_.Name }) -join ', '
-            Write-Host "  [~] $elapsed elapsed - still waiting on $running job(s): $runningNames" -ForegroundColor DarkGray
-            Start-Sleep -Seconds 15
-        }
-    }
-    # Print any final completions not yet reported
-    foreach ($j in $allScanJobs) {
-        if (-not $completedNames.ContainsKey($j.Id)) {
-            $elapsed = "{0:mm\:ss}" -f ((Get-Date) - $scanStart)
-            if ($j.State -eq 'Completed') {
-                Write-Host "  [+] $($j.Name) complete ($elapsed)" -ForegroundColor Green
-            } else {
-                Write-Host "  [!] $($j.Name) $($j.State) ($elapsed)" -ForegroundColor Red
-            }
-        }
+
+        if (-not $stillRunning) { break }
+
+        $elapsed = "{0:mm\:ss}" -f ((Get-Date) - $scanStart)
+        $runningNames = ($stillRunning | ForEach-Object { $jobNames[$_.Id] }) -join ', '
+        Write-Host "  [~] $elapsed elapsed - still waiting on $($stillRunning.Count) job(s): $runningNames" -ForegroundColor DarkGray
+        Start-Sleep -Seconds 15
     }
     $totalElapsed = "{0:mm\:ss}" -f ((Get-Date) - $scanStart)
     Write-Host "[+] All scans finished in $totalElapsed" -ForegroundColor Green
@@ -886,7 +881,7 @@ function Generate-WDAC {
     $failedJobs = @()
     foreach ($job in @($pf64,$pf32,$pd,$drivers,$tools)) {
         $jobResult = Receive-Job $job -ErrorAction SilentlyContinue
-        if ($job.State -eq 'Failed') {
+        if ((Get-Job -Id $job.Id).State -eq 'Failed') {
             $failedJobs += $job.Name
             Write-Host "[!] Scan job '$($job.Name)' failed: $($job.ChildJobs[0].JobStateInfo.Reason)" -ForegroundColor Red
         }
@@ -929,12 +924,12 @@ function Generate-WDAC {
     Set-RuleOption -FilePath $Policy -Option 10         # Boot Audit on Failure
     Set-RuleOption -FilePath $Policy -Option 12         # Enforce Store Apps
 
-    # Options 14 (ISG) and 19 (Dynamic Code Security) require Server 2019+ / Win10 1903+
+    # Option 19 (Dynamic Code Security) requires Server 2019+ / Win10 1903+
     $osBuild = [System.Environment]::OSVersion.Version.Build
     if ($osBuild -ge 17763) {
         Set-RuleOption -FilePath $Policy -Option 19     # Dynamic Code Security
     } else {
-        Write-Host "[!] Skipping options 14 and 19 - not supported on this OS (build $osBuild)" -ForegroundColor Yellow
+        Write-Host "[!] Skipping option 19 - not supported on this OS (build $osBuild)" -ForegroundColor Yellow
     }
     Write-Host "[+] Added configuration rules to policy!"
 
@@ -949,6 +944,7 @@ function Generate-WDAC {
             Write-Host "[+] Moved policy!"
             Invoke-CimMethod -Namespace root\Microsoft\Windows\CI -ClassName PS_UpdateAndCompareCIPolicy -MethodName Update -Arguments @{FilePath = "C:\Windows\System32\CodeIntegrity\SiPolicy.p7b"} > $null
             Write-Host "[+] Refreshed policy!" -ForegroundColor Green
+            Write-Host "[!] A REBOOT is required for WDAC enforcement to fully take effect!" -ForegroundColor Yellow
         } catch {
             Write-Host "[!] Failed to copy policy! Is controlled folder access on?" -ForegroundColor Red
         }
@@ -1101,6 +1097,7 @@ function win-ccdc {
                 Write-Host "[+] Copied WDAC policy to CodeIntegrity" -ForegroundColor Green
                 Invoke-CimMethod -Namespace root\Microsoft\Windows\CI -ClassName PS_UpdateAndCompareCIPolicy -MethodName Update -Arguments @{FilePath = "C:\Windows\System32\CodeIntegrity\SiPolicy.p7b"} > $null
                 Write-Host "[+] WDAC policy refreshed and active!" -ForegroundColor Green
+                Write-Host "[!] A REBOOT is required for WDAC enforcement to fully take effect!" -ForegroundColor Yellow
             } catch {
                 Write-Host "[!] Failed to deploy WDAC policy: $_" -ForegroundColor Red
                 Write-Host "[!] Is controlled folder access blocking the copy?" -ForegroundColor Yellow
