@@ -443,9 +443,8 @@ function Get-Tools {
         Copy-Item $localSysmonConfig "C:\Tools\sysmon-config.xml" -Force
     } else {
         Write-Host "  [~] sysmon-config.xml not found locally - will download" -ForegroundColor Yellow
-        $downloads += @{ Name = "Sysmon Config"; Url = "https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/Windows/sysmon-config.xml"; Out = "C:\Tools\sysmon-config.xml" }
+        $downloads += @{ Name = "Sysmon Config"; Url = "https://raw.githubusercontent.com/SouthwestCCDC/2026-Regionals-Shared/tree/main/The%20University%20of%20Texas%20at%20San%20Antonio/refs/heads/main/Windows/sysmon-config.xml"; Out = "C:\Tools\sysmon-config.xml" }
     }
-
     $jobs = @()
     foreach ($dl in $downloads) {
         Write-Host "  [>] Starting download: $($dl.Name)"
@@ -800,7 +799,7 @@ function Generate-WDAC {
         Copy-Item $src $dst -Force
     } else {
         Write-Host "[!] DefaultWindows_Enforced.xml not found locally. Downloading from GitHub..." -ForegroundColor Yellow
-        $downloadUrl = "https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/Windows/DefaultWindows_Audit.xml"
+        $downloadUrl = "https://raw.githubusercontent.com/deryavuz1/UTSA_CCDC_Team/refs/heads/main/2026_Windows/DefaultWindows_Audit.xml"
         try {
             Invoke-WebRequest -Uri $downloadUrl -OutFile $dst -UseBasicParsing -ErrorAction Stop
             Write-Host "[+] Successfully downloaded base policy" -ForegroundColor Green
@@ -1052,7 +1051,7 @@ function win-ccdc {
         $cableExe = "C:\Tools\Cable.exe"
         $cableOutput = Join-Path $desktopPath "Cable_DACL_$timestamp.txt"
         if (Test-Path $cableExe) {
-            & $cableExe dacl \find | Tee-Object -FilePath $cableOutput
+            & $cableExe dacl /find | Tee-Object -FilePath $cableOutput
             Write-Host "[+] Cable DACL output saved to: $cableOutput" -ForegroundColor Green
         } else {
             Write-Host "[!] Cable.exe not found at $cableExe" -ForegroundColor Red
