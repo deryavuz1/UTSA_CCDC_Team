@@ -1,0 +1,22 @@
+[Unit]
+Description=MD5 Integrity Monitor — file integrity client (self-looping)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# The script runs its own internal sleep loop — systemd just starts it once
+# at boot. If it crashes for any reason, systemd will restart it.
+Type=simple
+User=root
+WorkingDirectory=/root/md5monitor
+ExecStart=/root/md5monitor/md5_monitor.sh
+
+Restart=on-failure
+RestartSec=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=md5monitor-client
+
+[Install]
+WantedBy=multi-user.target

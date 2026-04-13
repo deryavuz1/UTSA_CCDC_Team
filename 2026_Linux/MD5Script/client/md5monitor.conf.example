@@ -1,0 +1,39 @@
+# md5monitor.conf — Configuration for md5_monitor.sh
+# Copy this file to /root/md5monitor/md5monitor.conf and edit as needed.
+# This file is sourced as POSIX sh, so any valid sh syntax is accepted.
+
+# URL of the Python alert server (no trailing slash)
+SERVER_URL="http://192.168.1.100:8080"
+
+# Seconds to sleep between scans (default: 300 = 5 minutes)
+SCAN_INTERVAL=300
+
+# ── Jump box (optional) ────────────────────────────────────────────────────────
+# If set, alerts are sent by SSHing into the jump box and running curl there.
+# All three must be set together; JUMPBOX_SSH_PORT defaults to 22 if omitted.
+#
+# Auth: by default root's SSH key is used (key must be authorised on the jump
+# box for the specified user). To use a password instead, set
+# JUMPBOX_SSH_PASSWORD_FILE to a file whose sole content is the password.
+# Password auth requires 'sshpass' to be installed on this machine.
+#
+# JUMPBOX_SSH_IP=192.168.1.50
+# JUMPBOX_SSH_PORT=22
+# JUMPBOX_SSH_USER=monitor
+# JUMPBOX_SSH_PASSWORD_FILE=/root/md5monitor/jumpbox.pass
+
+# List the files and directories to monitor, one per line.
+# Directories are scanned recursively.
+# This must be a shell function named exactly "monitor_paths".
+monitor_paths() {
+    printf '%s\n' \
+        "/etc/passwd"        \
+        "/etc/shadow"        \
+        "/etc/sudoers"       \
+        "/etc/ssh"           \
+        "/etc/crontab"       \
+        "/etc/cron.d"        \
+        "/root/.bashrc"      \
+        "/root/.bash_profile"\
+        "/root/.ssh"
+}

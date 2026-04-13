@@ -1,0 +1,25 @@
+[Unit]
+Description=MD5 Integrity Monitor - alert server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/md5monitor
+
+ExecStart=/usr/bin/python3 /opt/md5monitor/md5_server.py
+
+# Override port or data directory via environment if needed:
+# Environment=MD5MONITOR_PORT=8080
+# Environment=MD5MONITOR_DATA=/opt/md5monitor
+
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=md5monitor-server
+
+[Install]
+WantedBy=multi-user.target

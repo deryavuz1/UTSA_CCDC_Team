@@ -1,0 +1,17 @@
+# md5monitor_server.conf — Configuration for md5_server.py
+# Copy this file to the same folder as md5_server.py and rename it to
+# md5monitor_server.conf, then edit as needed.
+#
+# All keys are optional — defaults are shown in the comments.
+
+[md5monitor]
+
+# Interface to listen on. 0.0.0.0 means all interfaces.
+host = 0.0.0.0
+
+# TCP port for the web UI and alert receiver.
+port = 8080
+
+# Where to store alerts.json.
+# Defaults to the folder containing md5_server.py if not set.
+# data_dir = /opt/md5monitor
