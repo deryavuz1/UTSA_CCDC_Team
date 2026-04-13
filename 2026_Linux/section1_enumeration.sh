@@ -615,31 +615,32 @@ info "Test SSH connectivity in a separate terminal now before continuing."
 pause_step
 
 section_header "23) Move SUDO/CHATTR Binary"
-warn "Moving sudo/chattr can lock out normal administration paths."
-if [[ -f "$MOVE_KEY_BIN_FLAG" ]]; then
-  info "Move prompt has already been answered once on this host. Skipping."
-elif ask_yes_no "Proceed with moving chattr and sudo binaries to /root/.wow_bin_*?" "N"; then
-  chattr_path="$(command -v chattr || true)"
-  sudo_path="$(command -v sudo || true)"
-
-  if [[ -n "$chattr_path" && -x "$chattr_path" ]]; then
-    mv "$chattr_path" /root/.wow_bin_c
-    ok "Moved $chattr_path -> /root/.wow_bin_c"
-  else
-    warn "chattr binary not found"
-  fi
-
-  if [[ -n "$sudo_path" && -x "$sudo_path" ]]; then
-    mv "$sudo_path" /root/.wow_bin_s
-    ok "Moved $sudo_path -> /root/.wow_bin_s"
-    configure_user_sudo_access /root/.wow_bin_s
-  else
-    warn "sudo binary not found"
-  fi
-else
-  info "Skipped moving sudo/chattr binaries."
-fi
-touch "$MOVE_KEY_BIN_FLAG"
+info "Binary relocation is disabled in this build."
+# warn "Moving sudo/chattr can lock out normal administration paths."
+# if [[ -f \"$MOVE_KEY_BIN_FLAG\" ]]; then
+#   info "Move prompt has already been answered once on this host. Skipping."
+# elif ask_yes_no "Proceed with moving chattr and sudo binaries to /root/.wow_bin_*?" "N"; then
+#   chattr_path="$(command -v chattr || true)"
+#   sudo_path="$(command -v sudo || true)"
+#
+#   if [[ -n "$chattr_path" && -x "$chattr_path" ]]; then
+#     mv "$chattr_path" /root/.wow_bin_c
+#     ok "Moved $chattr_path -> /root/.wow_bin_c"
+#   else
+#     warn "chattr binary not found"
+#   fi
+#
+#   if [[ -n "$sudo_path" && -x "$sudo_path" ]]; then
+#     mv "$sudo_path" /root/.wow_bin_s
+#     ok "Moved $sudo_path -> /root/.wow_bin_s"
+#     configure_user_sudo_access /root/.wow_bin_s
+#   else
+#     warn "sudo binary not found"
+#   fi
+# else
+#   info "Skipped moving sudo/chattr binaries."
+# fi
+# touch "$MOVE_KEY_BIN_FLAG"
 pause_step
 
 section_header "24) Cleanup Enumeration Artifacts from /root"
