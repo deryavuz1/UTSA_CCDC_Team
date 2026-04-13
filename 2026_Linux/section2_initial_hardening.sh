@@ -61,7 +61,6 @@ ListenAddress 0.0.0.0
 PermitRootLogin prohibit-password
 PubkeyAuthentication yes
 PasswordAuthentication ${password_auth}
-KbdInteractiveAuthentication no
 AuthenticationMethods ${auth_methods}
 PermitEmptyPasswords no
 MaxAuthTries 3
@@ -106,7 +105,15 @@ restart_ssh_service() {
 }
 
 apply_sysctl_hardening() {
+  local host_role="${1:-client}"
   local cfg="/etc/sysctl.conf"
+  local ip_forward="0"
+  local rp_filter="1"
+
+  if [[ "$host_role" == "router" ]]; then
+    ip_forward="1"
+    rp_filter="0"
+  fi
 
   backup_file "$cfg" /root/backup || true
 
@@ -137,15 +144,12 @@ fs.protected_regular 2
 net.core.bpf_jit_harden 2
 net.ipv4.tcp_congestion_control bbr
 net.core.default_qdisc fq_codel
-net.ipv4.ip_forward 0
 net.ipv4.tcp_syncookies 1
 net.ipv4.tcp_synack_retries 5
 net.ipv4.conf.default.send_redirects 0
 net.ipv4.conf.all.send_redirects 0
 net.ipv4.conf.default.accept_source_route 0
 net.ipv4.conf.all.accept_source_route 0
-net.ipv4.conf.default.rp_filter 1
-net.ipv4.conf.all.rp_filter 1
 net.ipv4.conf.default.log_martians 1
 net.ipv4.conf.all.log_martians 1
 net.ipv4.conf.default.accept_redirects 0
@@ -155,6 +159,10 @@ net.ipv4.conf.all.secure_redirects 0
 net.ipv4.icmp_ignore_bogus_error_responses 1
 net.ipv4.tcp_rfc1337 1
 EOF_SYSCTL
+
+  set_kv_conf "$cfg" "net.ipv4.ip_forward" "$ip_forward"
+  set_kv_conf "$cfg" "net.ipv4.conf.default.rp_filter" "$rp_filter"
+  set_kv_conf "$cfg" "net.ipv4.conf.all.rp_filter" "$rp_filter"
 
   if sysctl -p "$cfg"; then
     ok "Applied sysctl settings."
@@ -172,7 +180,7 @@ if ask_yes_no "Move listed binaries into /root/binaries now?" "N"; then
   for b in \
     /usr/bin/wget /usr/bin/curl /usr/bin/scp /usr/bin/rsync /usr/bin/nc /usr/bin/socat \
     /usr/bin/ftp /usr/bin/tftp /usr/bin/telnet /usr/bin/nmap \
-    /usr/bin/gcc /usr/bin/make /usr/bin/perl \
+    /usr/bin/gcc \
     /usr/bin/crontab /usr/bin/at; do
     if [[ -e "$b" ]]; then
       mv "$b" /root/binaries/ && ok "Moved $b"
@@ -278,8 +286,8 @@ fi
 
 section_header "7) Review Ports and Disable Unneeded Services"
 show_command_with_pause "ss -tulnap / netstat -tulnap" list_listening_sockets
-disable_service_if_present avahi-daemon
-disable_service_if_present cups
+disable_service_prompted avahi-daemon
+disable_service_prompted cups
 
 if ask_yes_no "Disable rpcbind? (Answer NO if NFS/port 2049 is required)" "N"; then
   disable_service_if_present rpcbind
@@ -296,7 +304,13 @@ fi
 pause_step
 
 section_header "8) Kernel Security (sysctl)"
-apply_sysctl_hardening
+read -r -p "Is this system a router or client? [client/router] (default: client): " host_role
+host_role="$(printf '%s' "${host_role:-client}" | tr '[:upper:]' '[:lower:]')"
+if [[ "$host_role" != "router" ]]; then
+  host_role="client"
+fi
+info "Applying ${host_role} sysctl profile."
+apply_sysctl_hardening "$host_role"
 pause_step
 
 section_header "9) Harden /tmp, /var/tmp, /dev/shm in fstab"
