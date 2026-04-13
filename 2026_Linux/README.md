@@ -2,11 +2,11 @@
 
 ## Files
 - `main_launcher.sh` - Launcher (sudo enforcement, optional GitHub script sync, section menu)
-- `section1_enumeration.sh`
-- `section2_initial_hardening.sh`
-- `section3_password_changes.sh`
-- `section4_setup_logging.sh`
-- `section5_setup_rsyslog.sh`
+- `section1_enumeration.sh` - Enumerates the system for basic information on OS and Network
+- `section2_initial_hardening.sh` - Implement quick hardening to secure against easy attacks
+- `section3_password_changes.sh` - Change all local passwords on the system
+- `section4_setup_logging.sh` - Install auditd and pspy and setup log rotation
+- `section5_setup_rsyslog.sh` - Setup remote logging. 
 
 ## Run
 ```bash
