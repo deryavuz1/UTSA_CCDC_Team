@@ -9,7 +9,7 @@ This is our team repo including our prepared ccripts, configs, and templates to 
 ### 2026_Linux
 Enumeration and hardening scripts for securing Linux systems during competition. Also includes utilities such as hash compare script, internal monitoring dashboard creation. 
 
-### Windows
+### 2026_Windows
 This directory contains our Windows enumeration and hardening scripts, including Sysmon endpoint logging configs and WDAC (Windows Defender Application Control) policies.
 
 
