@@ -169,13 +169,18 @@ Function Get-RegistryKeys {
 }
 
 function Get-Binary {
+    # Ensure C:\Tools exists (Get-Binary may be called independently of Get-Tools)
+    if (-not (Test-Path "C:\Tools")) {
+        New-Item -Path "C:\Tools" -ItemType Directory -Force | Out-Null
+    }
     Add-MpPreference -ExclusionPath "C:\Tools"
 
     Write-Host "[+] Resolving PingCastle latest release from GitHub API..." -ForegroundColor Cyan
     $pingCastleUrl = $null
     $pingCastleFilename = $null
+    $ghHeaders = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
     try {
-        $release = Invoke-RestMethod "https://api.github.com/repos/netwrix/pingcastle/releases/latest" -UseBasicParsing -ErrorAction Stop
+        $release = Invoke-RestMethod "https://api.github.com/repos/netwrix/pingcastle/releases/latest" -UseBasicParsing -Headers $ghHeaders -ErrorAction Stop
         $asset = $release.assets | Where-Object { $_.name -match "^PingCastle_.*\.zip$" -and $_.name -notmatch "AutoUpdater" } | Select-Object -First 1
         if ($asset) {
             $pingCastleUrl      = $asset.browser_download_url
@@ -203,7 +208,8 @@ function Get-Binary {
         $jobs += Start-Job -Name $dl.Name -ScriptBlock {
             param($url, $out)
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            Invoke-WebRequest $url -OutFile $out -UseBasicParsing
+            $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+            Invoke-WebRequest $url -OutFile $out -UseBasicParsing -Headers $headers
         } -ArgumentList $dl.Url, $dl.Out
     }
 
@@ -215,15 +221,43 @@ function Get-Binary {
         Remove-Job $j
     }
 
+    # Verify each download actually produced a file (jobs can "succeed" but write nothing
+    # if the URL redirected to an error page or the target directory was missing)
+    foreach ($dl in $downloads) {
+        if (-not (Test-Path $dl.Out)) {
+            Write-Host "  [!] $($dl.Name) file not found at $($dl.Out) after download - retrying synchronously..." -ForegroundColor Yellow
+            try {
+                Invoke-WebRequest $dl.Url -OutFile $dl.Out -UseBasicParsing -Headers $ghHeaders -ErrorAction Stop
+                Write-Host "  [+] $($dl.Name) downloaded on retry" -ForegroundColor Green
+            } catch {
+                Write-Host "  [!] $($dl.Name) retry also failed: $_" -ForegroundColor Red
+            }
+        }
+    }
+
     if (Test-Path "C:\Tools\pingcastle.zip") {
         $zipBytes = (Get-Item "C:\Tools\pingcastle.zip").Length
         if ($zipBytes -gt 10000) {
+            New-Item -ItemType Directory -Path "C:\Tools\pingcastle" -Force -ErrorAction SilentlyContinue | Out-Null
             Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force -ErrorAction SilentlyContinue
             Remove-Item "C:\Tools\pingcastle.zip"
-            if (Get-ChildItem "C:\Tools\pingcastle" -Filter "PingCastle.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1) {
-                Write-Host "[+] PingCastle extracted" -ForegroundColor Green
+
+            # PingCastle zips often contain a nested folder (e.g. PingCastle_3.5.0.44\).
+            # If PingCastle.exe isn't at the top level, find it in a subdirectory and
+            # move everything up so the expected path C:\Tools\pingcastle\PingCastle.exe works.
+            if (-not (Test-Path "C:\Tools\pingcastle\PingCastle.exe")) {
+                $nested = Get-ChildItem "C:\Tools\pingcastle" -Filter "PingCastle.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($nested) {
+                    $nestedDir = $nested.DirectoryName
+                    Get-ChildItem $nestedDir -Force | Move-Item -Destination "C:\Tools\pingcastle" -Force -ErrorAction SilentlyContinue
+                    # Clean up the now-empty nested folder
+                    Remove-Item $nestedDir -Recurse -Force -ErrorAction SilentlyContinue
+                    Write-Host "[+] PingCastle extracted (flattened from nested directory)" -ForegroundColor Green
+                } else {
+                    Write-Host "[!] PingCastle zip extracted but PingCastle.exe not found - zip may be corrupt" -ForegroundColor Red
+                }
             } else {
-                Write-Host "[!] PingCastle zip extracted but PingCastle.exe not found - zip may be corrupt" -ForegroundColor Red
+                Write-Host "[+] PingCastle extracted" -ForegroundColor Green
             }
         } else {
             Write-Host "[!] PingCastle zip is too small ($zipBytes bytes) - download likely failed" -ForegroundColor Red
@@ -239,7 +273,7 @@ function Setup-Graylog {
 
     Write-Host "[+] Downloading Graylog Sidecar installer..." -ForegroundColor Cyan
     try {
-        Invoke-WebRequest "https://github.com/Graylog2/collector-sidecar/releases/download/1.5.1/graylog_sidecar_installer_1.5.1-1.exe" -OutFile $installerPath -UseBasicParsing -ErrorAction Stop
+        Invoke-WebRequest "https://github.com/Graylog2/collector-sidecar/releases/download/1.5.1/graylog_sidecar_installer_1.5.1-1.exe" -OutFile $installerPath -UseBasicParsing -Headers @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } -ErrorAction Stop
         Write-Host "[+] Downloaded Graylog Sidecar installer" -ForegroundColor Green
     } catch {
         Write-Host "[!] Failed to download Graylog Sidecar: $_" -ForegroundColor Red
@@ -421,6 +455,12 @@ function Get-Tools {
     New-Item -Path C:\ -Name "Tools" -ItemType Directory -Force > $null
     Write-Host "[+] Created tools directory!"
 
+    # Add Defender exclusion BEFORE downloading or extracting anything.
+    # Without this, Defender quarantines executables the instant they are
+    # extracted from zip files, causing "Could not find file" errors.
+    Add-MpPreference -ExclusionPath "C:\Tools" -ErrorAction SilentlyContinue
+    Write-Host "[+] Added Defender exclusion for C:\Tools" -ForegroundColor Cyan
+
     $acl = New-Object System.Security.AccessControl.DirectorySecurity
     $acl.SetAccessRuleProtection($true, $false)
     $adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
@@ -459,7 +499,10 @@ function Get-Tools {
         $jobs += Start-Job -Name $dl.Name -ScriptBlock {
             param($url, $out)
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            Invoke-WebRequest $url -OutFile $out -UseBasicParsing
+            # Use a browser User-Agent - GitHub throttles/blocks the default
+            # PowerShell UA, causing silent 0-byte downloads in background jobs
+            $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+            Invoke-WebRequest $url -OutFile $out -UseBasicParsing -Headers $headers
         } -ArgumentList $dl.Url, $dl.Out
     }
 
@@ -475,6 +518,20 @@ function Get-Tools {
     }
     Write-Host "[+] Downloads finished ($failCount failure(s))" -ForegroundColor Green
 
+    # Verify each download actually produced a file and retry synchronously if missing
+    $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+    foreach ($dl in $downloads) {
+        if (-not (Test-Path $dl.Out)) {
+            Write-Host "  [!] $($dl.Name) not found at $($dl.Out) - retrying synchronously..." -ForegroundColor Yellow
+            try {
+                Invoke-WebRequest $dl.Url -OutFile $dl.Out -UseBasicParsing -Headers $headers -ErrorAction Stop
+                Write-Host "  [+] $($dl.Name) downloaded on retry" -ForegroundColor Green
+            } catch {
+                Write-Host "  [!] $($dl.Name) retry also failed: $_" -ForegroundColor Red
+            }
+        }
+    }
+
     Write-Host "[+] Expanding archives"
     foreach ($archive in @(
         @{ Zip = "C:\Tools\Autoruns.zip"; Dest = "C:\Tools\Autoruns"; Name = "Autoruns" }
@@ -482,6 +539,9 @@ function Get-Tools {
         @{ Zip = "C:\Tools\ldapfw.zip";   Dest = "C:\Tools\ldapfw";   Name = "LDAP Firewall" }
     )) {
         if (Test-Path $archive.Zip) {
+            # Pre-create destination directory - Expand-Archive in PS 5.1 can fail
+            # with "Could not find file" if the target directory tree doesn't exist
+            New-Item -ItemType Directory -Path $archive.Dest -Force -ErrorAction SilentlyContinue | Out-Null
             Expand-Archive -Path $archive.Zip -DestinationPath $archive.Dest -Force
             Remove-Item $archive.Zip -Force -ErrorAction SilentlyContinue
             Write-Host "[+] Expanded and removed $($archive.Name) archive" -ForegroundColor Green
@@ -504,7 +564,7 @@ function Get-Tools {
 
     if (Test-Path "C:\Tools\ldapfw") {
         try {
-            Invoke-WebRequest https://raw.githubusercontent.com/zeronetworks/ldapfw/refs/heads/master/example_configs/DACLPrevention_config.json -OutFile "C:\Tools\ldapfw\DACLPrevention_config.json" -UseBasicParsing -ErrorAction Stop
+            Invoke-WebRequest https://raw.githubusercontent.com/zeronetworks/ldapfw/refs/heads/master/example_configs/DACLPrevention_config.json -OutFile "C:\Tools\ldapfw\DACLPrevention_config.json" -UseBasicParsing -Headers @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } -ErrorAction Stop
             Move-Item "C:\Tools\ldapfw\DACLPrevention_config.json" "C:\Tools\ldapfw\config.json" -Force
             Write-Host "[+] Downloaded LDAP Firewall configuration" -ForegroundColor Green
         } catch {
@@ -1798,9 +1858,33 @@ function Apply-SecurityBaseline {
     if (-not (Test-Path $toolsDir)) { New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null }
 
     if (-not (Test-Path $lgpo)) {
-        Write-Host "[+] LGPO.exe not found - you will need it from the Microsoft Security Compliance Toolkit" -ForegroundColor Yellow
-        Write-Host "    Download from: https://www.microsoft.com/en-us/download/details.aspx?id=55319" -ForegroundColor Yellow
-        Write-Host "    Place LGPO.exe in C:\Tools\ and re-run this function" -ForegroundColor Yellow
+        Write-Host "[+] LGPO.exe not found - attempting to download from Microsoft..." -ForegroundColor Yellow
+        try {
+            $lgpoZip = Join-Path $toolsDir "LGPO.zip"
+            $confirmPage = Invoke-WebRequest -Uri "https://www.microsoft.com/en-us/download/confirmation.aspx?id=55319" -UseBasicParsing -ErrorAction Stop
+            $lgpoLink = $confirmPage.Links | Where-Object { $_.href -match "download\.microsoft\.com" -and $_.href -match "LGPO\.zip" } | Select-Object -First 1
+            if ($lgpoLink) {
+                Invoke-WebRequest -Uri $lgpoLink.href -OutFile $lgpoZip -UseBasicParsing -ErrorAction Stop
+                Expand-Archive -Path $lgpoZip -DestinationPath $toolsDir -Force
+                Remove-Item $lgpoZip -Force -ErrorAction SilentlyContinue
+                # LGPO.exe may be nested in a subfolder after extraction
+                if (-not (Test-Path $lgpo)) {
+                    $found = Get-ChildItem $toolsDir -Filter "LGPO.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if ($found) { Copy-Item $found.FullName $lgpo -Force }
+                }
+                if (Test-Path $lgpo) {
+                    Write-Host "[+] LGPO.exe downloaded and extracted to $lgpo" -ForegroundColor Green
+                } else {
+                    Write-Host "[!] LGPO.zip extracted but LGPO.exe not found at expected path" -ForegroundColor Red
+                }
+            } else {
+                throw "Could not find LGPO.zip link on download page"
+            }
+        } catch {
+            Write-Host "[!] Failed to auto-download LGPO.exe: $_" -ForegroundColor Red
+            Write-Host "    Download from: https://www.microsoft.com/en-us/download/details.aspx?id=55319" -ForegroundColor Yellow
+            Write-Host "    Place LGPO.exe in C:\Tools\ and re-run this function" -ForegroundColor Yellow
+        }
     } else {
         Write-Host "[+] LGPO.exe found at $lgpo" -ForegroundColor Green
     }
@@ -1813,42 +1897,49 @@ function Apply-SecurityBaseline {
         $osBuild      = [System.Environment]::OSVersion.Version.Build
         $osCaption    = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").ProductName
 
-        $baselineUrl = switch ($osBuild) {
-            { $_ -ge 26100 } {
-                "https://download.microsoft.com/download/SCT/Windows_Server_2025_Security_Baseline.zip"
-                break
-            }
-            { $_ -ge 20348 } {
-                "https://download.microsoft.com/download/8/5/C/85C25433-A1B0-4FFA-9429-7E023BBE2AE9/Windows%20Server%202022%20Security%20Baseline.zip"
-                break
-            }
-            { $_ -ge 17763 } {
-                "https://download.microsoft.com/download/2/C/4/2C418B48-6CFD-4F41-8E55-1CA74A8DAF0D/Windows%2010%20Version%201809%20and%20Windows%20Server%202019%20Security%20Baseline.zip"
-                break
-            }
-            { $_ -ge 14393 } {
-                "https://download.microsoft.com/download/E/8/9/E89A7B3B-5AFC-4A72-A3AE-AFBDB7E1CB76/Windows%20Server%202016%20Security%20Baseline.zip"
-                break
-            }
-            default {
-                $null
-            }
+        # Match the OS build to the baseline zip filename on the Microsoft download page.
+        # These are the file names listed at https://www.microsoft.com/en-us/download/details.aspx?id=55319
+        $baselineFileName = switch ($osBuild) {
+            { $_ -ge 26100 } { "Windows Server 2025 Security Baseline"; break }
+            { $_ -ge 20348 } { "Windows Server 2022 Security Baseline"; break }
+            { $_ -ge 17763 } { "Windows 10 Version 1809 and Windows Server 2019 Security Baseline"; break }
+            { $_ -ge 14393 } { "Windows 10 Version 1607 and Windows Server 2016 Security Baseline"; break }
+            default          { $null }
         }
 
-        if (-not $baselineUrl) {
-            Write-Host "[!] Unrecognised OS build ($osBuild / $osCaption) - cannot select a baseline URL automatically." -ForegroundColor Red
+        if (-not $baselineFileName) {
+            Write-Host "[!] Unrecognised OS build ($osBuild / $osCaption) - cannot select a baseline automatically." -ForegroundColor Red
             Write-Host "[!] Download the correct baseline manually from:" -ForegroundColor Yellow
             Write-Host "    https://www.microsoft.com/en-us/download/details.aspx?id=55319" -ForegroundColor Yellow
             Write-Host "[!] Extract to $baselineDir and re-run" -ForegroundColor Yellow
         } else {
-            Write-Host "[+] Detected OS: $osCaption (build $osBuild) - using matching baseline" -ForegroundColor Cyan
+            Write-Host "[+] Detected OS: $osCaption (build $osBuild) - looking for '$baselineFileName'" -ForegroundColor Cyan
+            $downloaded = $false
+
+            # Fetch the download confirmation page and extract the actual CDN URL for the
+            # matching baseline zip.  Microsoft rotates the GUID-based paths so hardcoded
+            # URLs break; scraping the confirmation page gives us the current link.
             try {
-                Invoke-WebRequest -Uri $baselineUrl -OutFile $baselineZip -UseBasicParsing
-                Expand-Archive -Path $baselineZip -DestinationPath $baselineDir -Force
-                Remove-Item $baselineZip -Force
-                Write-Host "[+] Security Baseline extracted to $baselineDir" -ForegroundColor Green
+                Write-Host "[+] Resolving download URL from Microsoft Download Center..." -ForegroundColor Cyan
+                $confirmPage = Invoke-WebRequest -Uri "https://www.microsoft.com/en-us/download/confirmation.aspx?id=55319" -UseBasicParsing -ErrorAction Stop
+                $links = $confirmPage.Links | Where-Object { $_.href -match "download\.microsoft\.com" -and $_.href -match [regex]::Escape($baselineFileName) } | Select-Object -First 1
+                if ($links) {
+                    $resolvedUrl = $links.href
+                    Write-Host "[+] Resolved URL: $resolvedUrl" -ForegroundColor Green
+                    Invoke-WebRequest -Uri $resolvedUrl -OutFile $baselineZip -UseBasicParsing -ErrorAction Stop
+                    Expand-Archive -Path $baselineZip -DestinationPath $baselineDir -Force
+                    Remove-Item $baselineZip -Force
+                    Write-Host "[+] Security Baseline extracted to $baselineDir" -ForegroundColor Green
+                    $downloaded = $true
+                } else {
+                    Write-Host "[!] Could not find a matching baseline link on the download page" -ForegroundColor Yellow
+                }
             } catch {
-                Write-Host "[!] Failed to download baseline: $_" -ForegroundColor Red
+                Write-Host "[!] Failed to resolve or download baseline from confirmation page: $_" -ForegroundColor Yellow
+            }
+
+            if (-not $downloaded) {
+                Write-Host "[!] Automatic download failed." -ForegroundColor Red
                 Write-Host "[!] Download manually from https://www.microsoft.com/en-us/download/details.aspx?id=55319" -ForegroundColor Yellow
                 Write-Host "[!] Extract to $baselineDir and re-run" -ForegroundColor Yellow
             }
