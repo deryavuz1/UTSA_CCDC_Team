@@ -27,8 +27,9 @@ SECTION2_URL="${SECTION2_URL:-$BASE/section2_initial_hardening.sh}"
 SECTION3_URL="${SECTION3_URL:-$BASE/section3_password_changes.sh}"
 SECTION4_URL="${SECTION4_URL:-$BASE/section4_setup_logging.sh}"
 SECTION5_URL="${SECTION5_URL:-$BASE/section5_setup_rsyslog.sh}"
+SECTION6_URL="${SECTION6_URL:-$BASE/section6_threat_hunting.sh}"
 AUDIT_RULES_URL="${AUDIT_RULES_URL:-$BASE/audit.rules}"
-export SECTION1_URL SECTION2_URL SECTION3_URL SECTION4_URL SECTION5_URL AUDIT_RULES_URL
+export SECTION1_URL SECTION2_URL SECTION3_URL SECTION4_URL SECTION5_URL SECTION6_URL AUDIT_RULES_URL
 
 log_line() {
   local level="$1"
@@ -348,6 +349,7 @@ sync_scripts_from_github() {
     "section3_password_changes.sh|$SECTION3_URL" \
     "section4_setup_logging.sh|$SECTION4_URL" \
     "section5_setup_rsyslog.sh|$SECTION5_URL" \
+    "section6_threat_hunting.sh|$SECTION6_URL" \
     "audit.rules|$AUDIT_RULES_URL"; do
     local file url
     file="${pair%%|*}"
@@ -393,7 +395,8 @@ menu() {
     printf '%s\n' "3) Section 3 - Password Changes"
     printf '%s\n' "4) Section 4 - Setup Logging"
     printf '%s\n' "5) Section 5 - Setup Rsyslog"
-    printf '%s\n' "6) Run All Sections"
+    printf '%s\n' "6) Section 6 - Threat Hunting"
+    printf '%s\n' "7) Run All Sections"
     printf '%s\n' "0) Exit"
 
     read -r -p "Choose an option: " choice
@@ -404,12 +407,14 @@ menu() {
       3) run_section_script "section3_password_changes.sh" ;;
       4) run_section_script "section4_setup_logging.sh" ;;
       5) run_section_script "section5_setup_rsyslog.sh" ;;
-      6)
+      6) run_section_script "section6_threat_hunting.sh" ;;
+      7)
         run_section_script "section1_enumeration.sh"
         run_section_script "section2_initial_hardening.sh"
         run_section_script "section3_password_changes.sh"
         run_section_script "section4_setup_logging.sh"
         run_section_script "section5_setup_rsyslog.sh"
+        run_section_script "section6_threat_hunting.sh"
         ;;
       0)
         ok "Exiting launcher."

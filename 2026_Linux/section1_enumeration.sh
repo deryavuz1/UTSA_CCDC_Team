@@ -11,6 +11,10 @@ TARGET_USER="${SUDO_USER:-root}"
 TARGET_HOME="$(getent passwd "$TARGET_USER" | awk -F: '{print $6}')"
 TARGET_HOME="${TARGET_HOME:-/root}"
 MOVE_KEY_BIN_FLAG="/root/.key_binary_move_prompt_done"
+TH_DIR="/root/threatHunting_files"
+TH_BASELINE_DIR="$TH_DIR/baseline"
+TH_BASELINE_EPOCH_FILE="$TH_DIR/baseline_epoch"
+TH_BASELINE_PSPY_TS_FILE="$TH_DIR/baseline_pspy_ts"
 SUID_FILE="/root/suid_files.txt"
 SGID_FILE="/root/sgid_files.txt"
 SUID_UNEXPECTED_FILE="/root/suid_unexpected.txt"
@@ -114,6 +118,160 @@ show_shell_with_pause() {
   show_output_source_header "COMMAND: $label"
   bash -c "$shell_cmd" || warn "Command failed: $label"
   pause_step
+}
+
+configure_user_sudo_access() {
+  local moved_sudo="$1"
+  local raw_users user home bashrc user_group
+  local configured_any=0
+
+  read -r -p "Enter users who still need sudo access (comma-separated, blank for none): " raw_users
+  [[ -z "$raw_users" ]] && return 0
+
+  while IFS= read -r user; do
+    [[ -z "$user" ]] && continue
+
+    if ! getent passwd "$user" >/dev/null 2>&1; then
+      warn "User not found, skipping sudo copy: $user"
+      continue
+    fi
+
+    home="$(getent passwd "$user" | awk -F: '{print $6}')"
+    if [[ -z "$home" || ! -d "$home" ]]; then
+      warn "Home directory not found for $user, skipping."
+      continue
+    fi
+
+    install -d -m 755 -o root -g root "$home/binaries"
+    cp -a "$moved_sudo" "$home/binaries/sudo"
+    chown root:root "$home/binaries/sudo"
+    chmod 4755 "$home/binaries/sudo"
+
+    bashrc="$home/.bashrc"
+    [[ -f "$bashrc" ]] || touch "$bashrc"
+    if ! grep -Fq 'export PATH="$PATH:$HOME/binaries"' "$bashrc" 2>/dev/null; then
+      printf '\nexport PATH="$PATH:$HOME/binaries"\n' >>"$bashrc"
+    fi
+    user_group="$(id -gn "$user" 2>/dev/null || printf '%s' "$user")"
+    chown "$user":"$user_group" "$bashrc" 2>/dev/null || true
+
+    ok "Provisioned $home/binaries/sudo for $user and updated $bashrc"
+    configured_any=1
+  done < <(printf '%s\n' "$raw_users" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+
+  if [[ "$configured_any" -eq 0 ]]; then
+    info "No per-user sudo copies were configured."
+  fi
+}
+
+normalize_threat_snapshot_for_baseline() {
+  local snapshot_name="$1"
+  local raw_file="$2"
+
+  case "$snapshot_name" in
+    sockets)
+      awk 'NR > 1 && NF {
+        gsub(/[[:space:]]+/, " ")
+        sub(/^ /, "")
+        print
+      }' "$raw_file" | sort -u
+      ;;
+    lsof)
+      awk 'NR > 1 && NF {
+        $2 = ""
+        gsub(/[[:space:]]+/, " ")
+        sub(/^ /, "")
+        print
+      }' "$raw_file" | sort -u
+      ;;
+    w)
+      awk 'NR > 2 && NF {
+        gsub(/[[:space:]]+/, " ")
+        sub(/^ /, "")
+        print
+      }' "$raw_file" | sort -u
+      ;;
+    lastb)
+      awk 'NF && $0 !~ /^btmp begins/ {
+        gsub(/[[:space:]]+/, " ")
+        sub(/^ /, "")
+        print
+      }' "$raw_file"
+      ;;
+    last_i)
+      awk 'NF && $0 !~ /^wtmp begins/ {
+        gsub(/[[:space:]]+/, " ")
+        sub(/^ /, "")
+        print
+      }' "$raw_file"
+      ;;
+    *)
+      cat "$raw_file"
+      ;;
+  esac
+}
+
+seed_threat_hunting_baseline_if_missing() {
+  local temp_dir="$TH_DIR/.baseline_seed_$$"
+  local snapshot_name raw_file norm_file baseline_raw baseline_norm
+  local created_any=0
+  local baseline_epoch baseline_pspy_ts
+
+  mkdir -p "$TH_BASELINE_DIR" "$temp_dir"
+
+  for snapshot_name in sockets lsof w lastb last_i; do
+    baseline_raw="$TH_BASELINE_DIR/${snapshot_name}.raw"
+    baseline_norm="$TH_BASELINE_DIR/${snapshot_name}.norm"
+
+    if [[ -f "$baseline_raw" && -f "$baseline_norm" ]]; then
+      continue
+    fi
+
+    raw_file="$temp_dir/${snapshot_name}.raw"
+    norm_file="$temp_dir/${snapshot_name}.norm"
+
+    case "$snapshot_name" in
+      sockets)
+        list_listening_sockets >"$raw_file" 2>&1 || true
+        ;;
+      lsof)
+        if command_exists lsof; then
+          lsof -i -n -P >"$raw_file" 2>&1 || true
+        else
+          printf '%s\n' "lsof command not available" >"$raw_file"
+        fi
+        ;;
+      w)
+        w >"$raw_file" 2>&1 || true
+        ;;
+      lastb)
+        lastb 2>/dev/null | head -n 40 >"$raw_file"
+        ;;
+      last_i)
+        last -i 2>/dev/null | head -n 40 >"$raw_file"
+        ;;
+    esac
+
+    normalize_threat_snapshot_for_baseline "$snapshot_name" "$raw_file" >"$norm_file"
+    cp -a "$raw_file" "$baseline_raw"
+    cp -a "$norm_file" "$baseline_norm"
+    created_any=1
+  done
+
+  rm -rf "$temp_dir"
+
+  if [[ "$created_any" -eq 1 || ! -s "$TH_BASELINE_EPOCH_FILE" || ! -s "$TH_BASELINE_PSPY_TS_FILE" ]]; then
+    baseline_epoch="$(date +%s)"
+    baseline_pspy_ts="$(date '+%Y/%m/%d %H:%M:%S')"
+    printf '%s\n' "$baseline_epoch" >"$TH_BASELINE_EPOCH_FILE"
+    printf '%s\n' "$baseline_pspy_ts" >"$TH_BASELINE_PSPY_TS_FILE"
+  fi
+
+  if [[ "$created_any" -eq 1 ]]; then
+    ok "Threat hunting baseline seeded under $TH_BASELINE_DIR"
+  else
+    info "Threat hunting baseline already exists under $TH_BASELINE_DIR"
+  fi
 }
 
 start_suid_guid_scan_bg() {
@@ -314,11 +472,17 @@ show_shell_with_pause "last -i | head -n 40 (recent successful logins with sourc
 warn "TAKE A SCREENSHOT! w, lastb, and last -i output."
 pause_step
 
+section_header "7b) Seed Threat Hunting Baseline"
+seed_threat_hunting_baseline_if_missing
+pause_step
+
 section_header "8) Enabled Startup Services"
 show_shell_with_pause "systemctl list-unit-files --type=service | grep enabled" "systemctl list-unit-files --type=service | grep enabled"
 
 section_header "9) Running Processes"
-show_command_with_pause "ps -efH" ps -efH
+show_output_source_header "COMMAND: ps -efH"
+ps -efH | awk 'NR==1 {print; next} $1=="root" {print "\033[1;31m" $0 "\033[0m"; next} {print}'
+pause_step
 
 section_header "10) Cron Jobs"
 show_output_source_header "COMMAND: crontab -l for all users in /etc/passwd"
@@ -357,7 +521,7 @@ section_header "13) Validate File Integrity in Background"
 start_integrity_check || true
 pause_step
 
-section_header "14) Install mlocate/plocate and Search for Password Artifacts"
+section_header "14) Install mlocate/plocate and Search for Password/Keytab Artifacts"
 section_header "14a) Install locate tooling and update database"
 if ensure_locate_tool; then
   updatedb || warn "updatedb failed"
@@ -373,21 +537,14 @@ else
   pause_step
 fi
 
-section_header "14c) Run keyword grep search in sensitive paths"
-read -r -p "Enter first password keyword to search for (blank to skip grep scan): " pw1
-read -r -p "Enter second password keyword to search for (blank to skip grep scan): " pw2
-
-if [[ -n "$pw1" && -n "$pw2" ]]; then
-  pattern="$(regex_escape "$pw1")|$(regex_escape "$pw2")"
-  show_output_source_header "COMMAND: find ... | grep password keywords"
-  find /etc /opt /tmp /home /usr /var -type f -print0 2>/dev/null \
-    | xargs -0 grep -IinH -E "$pattern" 2>/dev/null \
-    | tee /root/password_pattern_hits.txt || true
-  info "Password pattern hits saved to /root/password_pattern_hits.txt"
+section_header "14c) Run locate search for '.keytab'"
+if command_exists locate; then
+  show_shell_with_pause "locate --regex '\\.keytab$' | head -n 200" "locate --regex '\\.keytab$' 2>/dev/null | head -n 200"
 else
-  warn "Skipping pattern grep because both keywords were not provided."
+  show_output_source_header "COMMAND: locate --regex '\\.keytab$'"
+  warn "locate not available"
+  pause_step
 fi
-pause_step
 
 section_header "15) Find World-Writable Files and Directories"
 show_output_source_header "COMMAND: find world-writable files"
@@ -457,31 +614,33 @@ section_header "22) Manual Validation Prompt"
 info "Test SSH connectivity in a separate terminal now before continuing."
 pause_step
 
-section_header "23) Move Key Binaries (High-Risk)"
-warn "Moving sudo/chattr can lock out normal administration paths."
-if [[ -f "$MOVE_KEY_BIN_FLAG" ]]; then
-  info "Move prompt has already been answered once on this host. Skipping."
-elif ask_yes_no "Proceed with moving chattr and sudo binaries to /root/.wow_bin_*?" "N"; then
-  chattr_path="$(command -v chattr || true)"
-  sudo_path="$(command -v sudo || true)"
-
-  if [[ -n "$chattr_path" && -x "$chattr_path" ]]; then
-    mv "$chattr_path" /root/.wow_bin_c
-    ok "Moved $chattr_path -> /root/.wow_bin_c"
-  else
-    warn "chattr binary not found"
-  fi
-
-  if [[ -n "$sudo_path" && -x "$sudo_path" ]]; then
-    mv "$sudo_path" /root/.wow_bin_s
-    ok "Moved $sudo_path -> /root/.wow_bin_s"
-  else
-    warn "sudo binary not found"
-  fi
-else
-  info "Skipped moving sudo/chattr binaries."
-fi
-touch "$MOVE_KEY_BIN_FLAG"
+section_header "23) Move SUDO/CHATTR Binary"
+info "Binary relocation is disabled in this build."
+# warn "Moving sudo/chattr can lock out normal administration paths."
+# if [[ -f \"$MOVE_KEY_BIN_FLAG\" ]]; then
+#   info "Move prompt has already been answered once on this host. Skipping."
+# elif ask_yes_no "Proceed with moving chattr and sudo binaries to /root/.wow_bin_*?" "N"; then
+#   chattr_path="$(command -v chattr || true)"
+#   sudo_path="$(command -v sudo || true)"
+#
+#   if [[ -n "$chattr_path" && -x "$chattr_path" ]]; then
+#     mv "$chattr_path" /root/.wow_bin_c
+#     ok "Moved $chattr_path -> /root/.wow_bin_c"
+#   else
+#     warn "chattr binary not found"
+#   fi
+#
+#   if [[ -n "$sudo_path" && -x "$sudo_path" ]]; then
+#     mv "$sudo_path" /root/.wow_bin_s
+#     ok "Moved $sudo_path -> /root/.wow_bin_s"
+#     configure_user_sudo_access /root/.wow_bin_s
+#   else
+#     warn "sudo binary not found"
+#   fi
+# else
+#   info "Skipped moving sudo/chattr binaries."
+# fi
+# touch "$MOVE_KEY_BIN_FLAG"
 pause_step
 
 section_header "24) Cleanup Enumeration Artifacts from /root"
