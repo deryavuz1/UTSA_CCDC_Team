@@ -1,4 +1,4 @@
-# Linux Multi-Script Toolkit
+# 2026 NCCDC Linux Multi-Script Toolkit
 
 ## Files
 - `main_launcher.sh` - Launcher (sudo enforcement, optional GitHub script sync, section menu)
