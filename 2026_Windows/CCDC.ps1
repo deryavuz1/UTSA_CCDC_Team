@@ -169,18 +169,18 @@ Function Get-RegistryKeys {
 }
 
 function Get-Binary {
-    # Ensure C:\Tools exists (Get-Binary may be called independently of Get-Tools)
     if (-not (Test-Path "C:\Tools")) {
         New-Item -Path "C:\Tools" -ItemType Directory -Force | Out-Null
     }
     Add-MpPreference -ExclusionPath "C:\Tools"
+    Start-Sleep -Seconds 3
 
     Write-Host "[+] Resolving PingCastle latest release from GitHub API..." -ForegroundColor Cyan
     $pingCastleUrl = $null
     $pingCastleFilename = $null
-    $ghHeaders = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+    $ua = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
     try {
-        $release = Invoke-RestMethod "https://api.github.com/repos/netwrix/pingcastle/releases/latest" -UseBasicParsing -Headers $ghHeaders -ErrorAction Stop
+        $release = Invoke-RestMethod "https://api.github.com/repos/netwrix/pingcastle/releases/latest" -UseBasicParsing -Headers $ua -ErrorAction Stop
         $asset = $release.assets | Where-Object { $_.name -match "^PingCastle_.*\.zip$" -and $_.name -notmatch "AutoUpdater" } | Select-Object -First 1
         if ($asset) {
             $pingCastleUrl      = $asset.browser_download_url
@@ -195,53 +195,20 @@ function Get-Binary {
         $pingCastleFilename = "PingCastle_3.5.0.37.zip"
     }
 
-    Write-Host "[+] Downloading binaries in parallel..." -ForegroundColor Cyan
+    Write-Host "[+] Downloading binaries..." -ForegroundColor Cyan
     $downloads = @(
         @{ Name = "Cable";      Url = "https://github.com/logangoins/Cable/releases/download/1.1/Cable.exe";                              Out = "C:\Tools\Cable.exe" }
         @{ Name = "PingCastle"; Url = $pingCastleUrl;                                                                                     Out = "C:\Tools\pingcastle.zip" }
         @{ Name = "Certify";    Url = "https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/Certify.exe";                Out = "C:\Tools\Certify.exe" }
     )
 
-    $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, [Math]::Min($downloads.Count, 4))
-    $runspacePool.Open()
-
-    $runspaces = @()
     foreach ($dl in $downloads) {
-        Write-Host "  [>] Starting download: $($dl.Name)"
-        $ps = [PowerShell]::Create().AddScript({
-            param($url, $out)
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            $wc = New-Object System.Net.WebClient
-            $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            $wc.DownloadFile($url, $out)
-        }).AddArgument($dl.Url).AddArgument($dl.Out)
-        $ps.RunspacePool = $runspacePool
-        $runspaces += @{ Name = $dl.Name; PowerShell = $ps; Handle = $ps.BeginInvoke() }
-    }
-
-    foreach ($rs in $runspaces) {
-        try { $rs.PowerShell.EndInvoke($rs.Handle) } catch {}
-        if ($rs.PowerShell.HadErrors) {
-            $errMsg = $rs.PowerShell.Streams.Error | Select-Object -First 1
-            Write-Host "  [!] Download failed [$($rs.Name)]: $errMsg" -ForegroundColor Red
-        }
-        $rs.PowerShell.Dispose()
-    }
-    $runspacePool.Close()
-    $runspacePool.Dispose()
-
-    # Verify each download produced a file - retry only for missing ones
-    foreach ($dl in $downloads) {
-        if (-not (Test-Path $dl.Out)) {
-            Write-Host "  [!] $($dl.Name) file not found at $($dl.Out) - retrying..." -ForegroundColor Yellow
-            try {
-                $wc = New-Object System.Net.WebClient
-                $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                $wc.DownloadFile($dl.Url, $dl.Out)
-                Write-Host "  [+] $($dl.Name) downloaded on retry" -ForegroundColor Green
-            } catch {
-                Write-Host "  [!] $($dl.Name) retry also failed: $_" -ForegroundColor Red
-            }
+        Write-Host "  [>] Downloading: $($dl.Name)"
+        try {
+            Invoke-WebRequest $dl.Url -OutFile $dl.Out -UseBasicParsing -Headers $ua -ErrorAction Stop
+            Write-Host "  [+] $($dl.Name)" -ForegroundColor Green
+        } catch {
+            Write-Host "  [!] $($dl.Name) failed: $_" -ForegroundColor Red
         }
     }
 
@@ -249,18 +216,13 @@ function Get-Binary {
         $zipBytes = (Get-Item "C:\Tools\pingcastle.zip").Length
         if ($zipBytes -gt 10000) {
             New-Item -ItemType Directory -Path "C:\Tools\pingcastle" -Force -ErrorAction SilentlyContinue | Out-Null
-            Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force -ErrorAction SilentlyContinue
-            Remove-Item "C:\Tools\pingcastle.zip"
+            Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force
 
-            # PingCastle zips often contain a nested folder (e.g. PingCastle_3.5.0.44\).
-            # If PingCastle.exe isn't at the top level, find it in a subdirectory and
-            # move everything up so the expected path C:\Tools\pingcastle\PingCastle.exe works.
             if (-not (Test-Path "C:\Tools\pingcastle\PingCastle.exe")) {
                 $nested = Get-ChildItem "C:\Tools\pingcastle" -Filter "PingCastle.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
                 if ($nested) {
                     $nestedDir = $nested.DirectoryName
                     Get-ChildItem $nestedDir -Force | Move-Item -Destination "C:\Tools\pingcastle" -Force -ErrorAction SilentlyContinue
-                    # Clean up the now-empty nested folder
                     Remove-Item $nestedDir -Recurse -Force -ErrorAction SilentlyContinue
                     Write-Host "[+] PingCastle extracted (flattened from nested directory)" -ForegroundColor Green
                 } else {
@@ -271,7 +233,6 @@ function Get-Binary {
             }
         } else {
             Write-Host "[!] PingCastle zip is too small ($zipBytes bytes) - download likely failed" -ForegroundColor Red
-            Remove-Item "C:\Tools\pingcastle.zip" -Force
         }
     }
 
@@ -469,9 +430,7 @@ function Get-Wireshark {
 
     Write-Host "[+] Downloading Wireshark..." -ForegroundColor Cyan
     try {
-        $wc = New-Object System.Net.WebClient
-        $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        $wc.DownloadFile("https://www.wireshark.org/download/win64/Wireshark-latest-x64.exe", $wiresharkExe)
+        Invoke-WebRequest "https://www.wireshark.org/download/win64/Wireshark-latest-x64.exe" -OutFile $wiresharkExe -UseBasicParsing -ErrorAction Stop
         Write-Host "[+] Downloaded Wireshark installer" -ForegroundColor Green
     } catch {
         Write-Host "[!] Failed to download Wireshark: $_" -ForegroundColor Red
@@ -524,10 +483,8 @@ function Get-Tools {
     New-Item -Path C:\ -Name "Tools" -ItemType Directory -Force > $null
     Write-Host "[+] Created tools directory!"
 
-    # Add Defender exclusion BEFORE downloading or extracting anything.
-    # Without this, Defender quarantines executables the instant they are
-    # extracted from zip files, causing "Could not find file" errors.
     Add-MpPreference -ExclusionPath "C:\Tools" -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 3
     Write-Host "[+] Added Defender exclusion for C:\Tools" -ForegroundColor Cyan
 
     $acl = New-Object System.Security.AccessControl.DirectorySecurity
@@ -536,10 +493,10 @@ function Get-Tools {
     $systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule("NT AUTHORITY\SYSTEM", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
     $acl.AddAccessRule($adminRule)
     $acl.AddAccessRule($systemRule)
-    Set-Acl -Path "C:\Tools" -AclObject $acl
+    #Set-Acl -Path "C:\Tools" -AclObject $acl
     Write-Host "[+] Locked down C:\Tools - Administrators and SYSTEM only" -ForegroundColor Cyan
 
-    Write-Host "[+] Downloading all tools in parallel..." -ForegroundColor Cyan
+    Write-Host "[+] Downloading all tools..." -ForegroundColor Cyan
 
     $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
     $localSysmonConfig = Join-Path $scriptDir "sysmon-config.xml"
@@ -561,64 +518,19 @@ function Get-Tools {
         $downloads += @{ Name = "Sysmon Config"; Url = "https://raw.githubusercontent.com/SouthwestCCDC/2026-Regionals-Shared/refs/heads/main/The%20University%20of%20Texas%20at%20San%20Antonio/2026_Windows/sysmon-config.xml"; Out = "C:\Tools\sysmon-config.xml" }
     }
 
-    # Use runspaces (thread-based) instead of Start-Job (process-based) for parallel
-    # downloads.  Start-Job spawns a full powershell.exe per download which is slow on
-    # constrained CCDC VMs and can be blocked by constrained language mode / WDAC.
-    # Runspaces share the parent process and start in milliseconds.
-    # We use [System.Net.WebClient] instead of Invoke-WebRequest because WebClient is
-    # lower-level .NET and follows complex redirect chains (Mozilla CDN, Microsoft
-    # download center, Wireshark mirrors) natively without needing the PowerShell
-    # session state that Invoke-WebRequest relies on for cookie/redirect context.
-    $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, [Math]::Min($downloads.Count, 8))
-    $runspacePool.Open()
-
-    $runspaces = @()
-    foreach ($dl in $downloads) {
-        Write-Host "  [>] Starting download: $($dl.Name)"
-        $ps = [PowerShell]::Create().AddScript({
-            param($url, $out)
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            $wc = New-Object System.Net.WebClient
-            $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            $wc.DownloadFile($url, $out)
-        }).AddArgument($dl.Url).AddArgument($dl.Out)
-        $ps.RunspacePool = $runspacePool
-        $runspaces += @{ Name = $dl.Name; PowerShell = $ps; Handle = $ps.BeginInvoke() }
-    }
-
-    Write-Host "[+] Waiting for all downloads to complete..." -ForegroundColor Cyan
+    $ua = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
     $failCount = 0
-    foreach ($rs in $runspaces) {
+    foreach ($dl in $downloads) {
+        Write-Host "  [>] Downloading: $($dl.Name)"
         try {
-            $rs.PowerShell.EndInvoke($rs.Handle)
+            Invoke-WebRequest $dl.Url -OutFile $dl.Out -UseBasicParsing -Headers $ua -ErrorAction Stop
+            Write-Host "  [+] $($dl.Name)" -ForegroundColor Green
         } catch {
-            # ignore - we check for errors via HadErrors below
-        }
-        if ($rs.PowerShell.HadErrors) {
-            $errMsg = $rs.PowerShell.Streams.Error | Select-Object -First 1
-            Write-Host "  [!] Download failed [$($rs.Name)]: $errMsg" -ForegroundColor Red
+            Write-Host "  [!] $($dl.Name) failed: $_" -ForegroundColor Red
             $failCount++
         }
-        $rs.PowerShell.Dispose()
     }
-    $runspacePool.Close()
-    $runspacePool.Dispose()
     Write-Host "[+] Downloads finished ($failCount failure(s))" -ForegroundColor Green
-
-    # Verify each download produced a file - retry synchronously only for missing ones
-    foreach ($dl in $downloads) {
-        if (-not (Test-Path $dl.Out)) {
-            Write-Host "  [!] $($dl.Name) not found at $($dl.Out) - retrying..." -ForegroundColor Yellow
-            try {
-                $wc = New-Object System.Net.WebClient
-                $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                $wc.DownloadFile($dl.Url, $dl.Out)
-                Write-Host "  [+] $($dl.Name) downloaded on retry" -ForegroundColor Green
-            } catch {
-                Write-Host "  [!] $($dl.Name) retry also failed: $_" -ForegroundColor Red
-            }
-        }
-    }
 
     Write-Host "[+] Expanding archives"
     foreach ($archive in @(
@@ -627,12 +539,9 @@ function Get-Tools {
         @{ Zip = "C:\Tools\ldapfw.zip";   Dest = "C:\Tools\ldapfw";   Name = "LDAP Firewall" }
     )) {
         if (Test-Path $archive.Zip) {
-            # Pre-create destination directory - Expand-Archive in PS 5.1 can fail
-            # with "Could not find file" if the target directory tree doesn't exist
             New-Item -ItemType Directory -Path $archive.Dest -Force -ErrorAction SilentlyContinue | Out-Null
-            Expand-Archive -Path $archive.Zip -DestinationPath $archive.Dest -Force
-            Remove-Item $archive.Zip -Force -ErrorAction SilentlyContinue
-            Write-Host "[+] Expanded and removed $($archive.Name) archive" -ForegroundColor Green
+            Expand-Archive -Path $archive.Zip -DestinationPath $archive.Dest
+            Write-Host "[+] Expanded $($archive.Name) archive" -ForegroundColor Green
         } else {
             Write-Host "[!] $($archive.Name) zip not found - download may have failed, skipping extraction" -ForegroundColor Red
         }
@@ -1941,7 +1850,6 @@ function Apply-SecurityBaseline {
                 Invoke-WebRequest -Uri $lgpoLink.href -OutFile $lgpoZip -UseBasicParsing -ErrorAction Stop
                 Expand-Archive -Path $lgpoZip -DestinationPath $toolsDir -Force
                 Remove-Item $lgpoZip -Force -ErrorAction SilentlyContinue
-                # LGPO.exe may be nested in a subfolder after extraction
                 if (-not (Test-Path $lgpo)) {
                     $found = Get-ChildItem $toolsDir -Filter "LGPO.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
                     if ($found) { Copy-Item $found.FullName $lgpo -Force }
@@ -1971,8 +1879,6 @@ function Apply-SecurityBaseline {
         $osBuild      = [System.Environment]::OSVersion.Version.Build
         $osCaption    = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion").ProductName
 
-        # Match the OS build to the baseline zip filename on the Microsoft download page.
-        # These are the file names listed at https://www.microsoft.com/en-us/download/details.aspx?id=55319
         $baselineFileName = switch ($osBuild) {
             { $_ -ge 26100 } { "Windows Server 2025 Security Baseline"; break }
             { $_ -ge 20348 } { "Windows Server 2022 Security Baseline"; break }
@@ -1990,9 +1896,6 @@ function Apply-SecurityBaseline {
             Write-Host "[+] Detected OS: $osCaption (build $osBuild) - looking for '$baselineFileName'" -ForegroundColor Cyan
             $downloaded = $false
 
-            # Fetch the download confirmation page and extract the actual CDN URL for the
-            # matching baseline zip.  Microsoft rotates the GUID-based paths so hardcoded
-            # URLs break; scraping the confirmation page gives us the current link.
             try {
                 Write-Host "[+] Resolving download URL from Microsoft Download Center..." -ForegroundColor Cyan
                 $confirmPage = Invoke-WebRequest -Uri "https://www.microsoft.com/en-us/download/confirmation.aspx?id=55319" -UseBasicParsing -ErrorAction Stop
