@@ -169,20 +169,42 @@ Function Get-RegistryKeys {
 }
 
 function Get-Binary {
-    Write-Host "[+] Adding Defender exclusion for C:\Tools" -ForegroundColor Cyan
     Add-MpPreference -ExclusionPath "C:\Tools"
+
+    Write-Host "[+] Resolving PingCastle latest release from GitHub API..." -ForegroundColor Cyan
+    $pingCastleUrl = $null
+    $pingCastleFilename = $null
+    try {
+        $release = Invoke-RestMethod "https://api.github.com/repos/netwrix/pingcastle/releases/latest" -UseBasicParsing -ErrorAction Stop
+        $asset = $release.assets | Where-Object { $_.name -match "^PingCastle_.*\.zip$" -and $_.name -notmatch "AutoUpdater" } | Select-Object -First 1
+        if ($asset) {
+            $pingCastleUrl      = $asset.browser_download_url
+            $pingCastleFilename = $asset.name
+            Write-Host "[+] PingCastle latest: $($release.tag_name) -> $pingCastleFilename" -ForegroundColor Green
+        } else {
+            throw "No matching zip asset found"
+        }
+    } catch {
+        Write-Host "[!] GitHub API unavailable, falling back to known-good URL: $_" -ForegroundColor Yellow
+        $pingCastleUrl      = "https://github.com/netwrix/pingcastle/releases/download/3.5.0.37/PingCastle_3.5.0.37.zip"
+        $pingCastleFilename = "PingCastle_3.5.0.37.zip"
+    }
 
     Write-Host "[+] Downloading binaries in parallel..." -ForegroundColor Cyan
     $downloads = @(
         @{ Name = "Cable";      Url = "https://github.com/logangoins/Cable/releases/download/1.1/Cable.exe";                              Out = "C:\Tools\Cable.exe" }
-        @{ Name = "PingCastle"; Url = "https://github.com/netwrix/pingcastle/releases/download/3.5.0.44/PingCastle_3.5.0.44.zip";          Out = "C:\Tools\pingcastle.zip" }
+        @{ Name = "PingCastle"; Url = $pingCastleUrl;                                                                                     Out = "C:\Tools\pingcastle.zip" }
         @{ Name = "Certify";    Url = "https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/Certify.exe";                Out = "C:\Tools\Certify.exe" }
     )
 
     $jobs = @()
     foreach ($dl in $downloads) {
         Write-Host "  [>] Starting download: $($dl.Name)"
-        $jobs += Start-Job -Name $dl.Name -ScriptBlock { param($url, $out) Invoke-WebRequest $url -OutFile $out -UseBasicParsing } -ArgumentList $dl.Url, $dl.Out
+        $jobs += Start-Job -Name $dl.Name -ScriptBlock {
+            param($url, $out)
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest $url -OutFile $out -UseBasicParsing
+        } -ArgumentList $dl.Url, $dl.Out
     }
 
     Wait-Job $jobs | Out-Null
@@ -194,8 +216,19 @@ function Get-Binary {
     }
 
     if (Test-Path "C:\Tools\pingcastle.zip") {
-        Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force
-        Remove-Item "C:\Tools\pingcastle.zip"
+        $zipBytes = (Get-Item "C:\Tools\pingcastle.zip").Length
+        if ($zipBytes -gt 10000) {
+            Expand-Archive "C:\Tools\pingcastle.zip" -DestinationPath "C:\Tools\pingcastle" -Force -ErrorAction SilentlyContinue
+            Remove-Item "C:\Tools\pingcastle.zip"
+            if (Get-ChildItem "C:\Tools\pingcastle" -Filter "PingCastle.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1) {
+                Write-Host "[+] PingCastle extracted" -ForegroundColor Green
+            } else {
+                Write-Host "[!] PingCastle zip extracted but PingCastle.exe not found - zip may be corrupt" -ForegroundColor Red
+            }
+        } else {
+            Write-Host "[!] PingCastle zip is too small ($zipBytes bytes) - download likely failed" -ForegroundColor Red
+            Remove-Item "C:\Tools\pingcastle.zip" -Force
+        }
     }
 
     Write-Host "[+] All binaries downloaded!" -ForegroundColor Green
@@ -408,7 +441,7 @@ function Get-Tools {
         @{ Name = "Firefox";        Url = "https://download.mozilla.org/?product=firefox-stub&os=win&lang=en-US";                                              Out = "C:\Tools\FirefoxInstaller.exe" }
         @{ Name = "LDAP Firewall";  Url = "https://github.com/zeronetworks/ldapfw/releases/download/v1.0.0/ldapfw_v1.0.0-x64.zip";                            Out = "C:\Tools\ldapfw.zip" }
         @{ Name = "ALTools";        Url = "https://download.microsoft.com/download/1/f/0/1f0e9569-3350-4329-b443-822976f29284/ALTools.exe";                    Out = "C:\Tools\ALTools.exe" }
-        @{ Name = "Wireshark Portable"; Url = "https://www.wireshark.org/download/win64/WiresharkPortable64_latest.paf.exe";                                    Out = "C:\Tools\WiresharkPortable.exe" }
+        @{ Name = "Wireshark";      Url = "https://www.wireshark.org/download/win64/Wireshark-latest-x64.exe";                                                  Out = "C:\Tools\WiresharkInstaller.exe" }
         @{ Name = "RefreshPolicy";     Url = "https://aka.ms/refreshpolicy";                                                                                     Out = "C:\Tools\RefreshPolicy.exe" }
     )
 
@@ -423,7 +456,11 @@ function Get-Tools {
     $jobs = @()
     foreach ($dl in $downloads) {
         Write-Host "  [>] Starting download: $($dl.Name)"
-        $jobs += Start-Job -Name $dl.Name -ScriptBlock { param($url, $out) Invoke-WebRequest $url -OutFile $out -UseBasicParsing } -ArgumentList $dl.Url, $dl.Out
+        $jobs += Start-Job -Name $dl.Name -ScriptBlock {
+            param($url, $out)
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest $url -OutFile $out -UseBasicParsing
+        } -ArgumentList $dl.Url, $dl.Out
     }
 
     Write-Host "[+] Waiting for all downloads to complete..." -ForegroundColor Cyan
@@ -477,19 +514,18 @@ function Get-Tools {
         Write-Host "[!] ldapfw directory not found - skipping LDAP Firewall config download" -ForegroundColor Red
     }
 
-    $wiresharkExe = "C:\Tools\WiresharkPortable.exe"
+    $wiresharkExe = "C:\Tools\WiresharkInstaller.exe"
     if (Test-Path $wiresharkExe) {
-        Write-Host "[+] Installing Wireshark Portable silently..." -ForegroundColor Cyan
-        Start-Process -FilePath $wiresharkExe -ArgumentList "/S /D=C:\Tools\WiresharkPortable" -Wait -NoNewWindow -ErrorAction SilentlyContinue
-        if (Test-Path "C:\Tools\WiresharkPortable\App\Wireshark\tshark.exe") {
-            Write-Host "[+] tshark installed at C:\Tools\WiresharkPortable\App\Wireshark\tshark.exe" -ForegroundColor Green
+        Write-Host "[+] Installing Wireshark silently..." -ForegroundColor Cyan
+        $proc = Start-Process -FilePath $wiresharkExe -ArgumentList "/S" -Wait -PassThru -NoNewWindow -ErrorAction SilentlyContinue
+        if ($proc.ExitCode -eq 0 -and (Test-Path "C:\Program Files\Wireshark\tshark.exe")) {
+            Write-Host "[+] tshark installed at C:\Program Files\Wireshark\tshark.exe" -ForegroundColor Green
         } else {
-            Write-Host "[!] tshark not found after install - you may need to install Wireshark manually" -ForegroundColor Yellow
-            Write-Host "[!] Or install tshark via: winget install WiresharkFoundation.Wireshark" -ForegroundColor Yellow
+            Write-Host "[!] Wireshark install may have failed (exit code $($proc.ExitCode)) - tshark not found" -ForegroundColor Yellow
         }
         Remove-Item $wiresharkExe -Force -ErrorAction SilentlyContinue
     } else {
-        Write-Host "[!] Wireshark Portable download not found - skipping tshark install" -ForegroundColor Yellow
+        Write-Host "[!] Wireshark installer not found - skipping tshark install" -ForegroundColor Yellow
     }
 
     Write-Host "[+] Done!" -ForegroundColor Green
@@ -1101,7 +1137,11 @@ function Generate-WDAC {
 
     function Set-WDACPolicyOptions {
         param([string]$FilePath, [string]$Name)
-        Set-CIPolicyIdInfo -FilePath $FilePath -PolicyName $Name -ResetPolicyID | Out-Null
+        try {
+            Set-CIPolicyIdInfo -FilePath $FilePath -PolicyName $Name -ResetPolicyID | Out-Null
+        } catch {
+            Set-CIPolicyIdInfo -FilePath $FilePath -PolicyName $Name | Out-Null
+        }
         Set-CIPolicyVersion -FilePath $FilePath -Version "1.0.0.0"
         Set-RuleOption -FilePath $FilePath -Option 3 -Delete
         Set-RuleOption -FilePath $FilePath -Option 6
@@ -1109,7 +1149,7 @@ function Generate-WDAC {
         Set-RuleOption -FilePath $FilePath -Option 9
         Set-RuleOption -FilePath $FilePath -Option 10
         Set-RuleOption -FilePath $FilePath -Option 12
-        if ($osBuild -ge 17763) {
+        if ($osBuild -ge 18362) {
             Set-RuleOption -FilePath $FilePath -Option 19
         }
     }
@@ -1263,7 +1303,11 @@ function Refresh-WDAC {
             Merge-CIPolicy -OutputFilePath $mergedXml -PolicyPaths $existingPolicies > $null
         }
 
-        Set-CIPolicyIdInfo -FilePath $mergedXml -PolicyName "WDAC-Combined" -ResetPolicyID | Out-Null
+        try {
+            Set-CIPolicyIdInfo -FilePath $mergedXml -PolicyName "WDAC-Combined" -ResetPolicyID | Out-Null
+        } catch {
+            Set-CIPolicyIdInfo -FilePath $mergedXml -PolicyName "WDAC-Combined" | Out-Null
+        }
         Set-CIPolicyVersion -FilePath $mergedXml -Version "1.0.0.0"
         Set-RuleOption -FilePath $mergedXml -Option 3 -Delete
         Set-RuleOption -FilePath $mergedXml -Option 6
@@ -1271,7 +1315,7 @@ function Refresh-WDAC {
         Set-RuleOption -FilePath $mergedXml -Option 9
         Set-RuleOption -FilePath $mergedXml -Option 10
         Set-RuleOption -FilePath $mergedXml -Option 12
-        if ($osBuild -ge 17763) {
+        if ($osBuild -ge 18362) {
             Set-RuleOption -FilePath $mergedXml -Option 19
         }
 
@@ -1287,11 +1331,18 @@ function Refresh-WDAC {
                 Write-Host "[!] citool --refresh exited with code $LASTEXITCODE" -ForegroundColor Red
             }
         } elseif ($hasRefreshExe) {
-            & $refreshPolicy
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "[+] Policy refreshed via RefreshPolicy.exe" -ForegroundColor Green
-            } else {
-                Write-Host "[!] RefreshPolicy.exe exited with code $LASTEXITCODE" -ForegroundColor Red
+            try {
+                & $refreshPolicy
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "[+] Policy refreshed via RefreshPolicy.exe" -ForegroundColor Green
+                } else {
+                    Write-Host "[!] RefreshPolicy.exe exited with code $LASTEXITCODE" -ForegroundColor Red
+                    Write-Host "[!] A REBOOT is required for the policy to take effect" -ForegroundColor Yellow
+                }
+            } catch {
+                Write-Host "[!] RefreshPolicy.exe failed to run: $_" -ForegroundColor Red
+                Write-Host "[!] The file may be corrupted - re-run Get-Tools to re-download it" -ForegroundColor Yellow
+                Write-Host "[!] A REBOOT is required for the policy to take effect" -ForegroundColor Yellow
             }
         } else {
             Write-Host "[!] Neither citool.exe nor RefreshPolicy.exe found" -ForegroundColor Red
@@ -1361,11 +1412,18 @@ function Refresh-WDAC {
             Write-Host "[!] citool --refresh exited with code $LASTEXITCODE" -ForegroundColor Red
         }
     } elseif ($hasRefreshExe) {
-        & $refreshPolicy
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "[+] All $deployed policies refreshed via RefreshPolicy.exe" -ForegroundColor Green
-        } else {
-            Write-Host "[!] RefreshPolicy.exe exited with code $LASTEXITCODE" -ForegroundColor Red
+        try {
+            & $refreshPolicy
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[+] All $deployed policies refreshed via RefreshPolicy.exe" -ForegroundColor Green
+            } else {
+                Write-Host "[!] RefreshPolicy.exe exited with code $LASTEXITCODE" -ForegroundColor Red
+                Write-Host "[!] A REBOOT is required to load policies" -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "[!] RefreshPolicy.exe failed to run: $_" -ForegroundColor Red
+            Write-Host "[!] The file may be corrupted - re-run Get-Tools to re-download it" -ForegroundColor Yellow
+            Write-Host "[!] A REBOOT is required to load policies" -ForegroundColor Yellow
         }
     } else {
         Write-Host "[!] No refresh tool available - REBOOT required to load policies" -ForegroundColor Yellow
@@ -1765,7 +1823,7 @@ function Apply-SecurityBaseline {
                 break
             }
             { $_ -ge 17763 } {
-                "https://download.microsoft.com/download/2/C/4/2C418B48-6CFD-4F41-8E55-1CA74A8DAF0D/Windows%20Server%202019%20Security%20Baseline.zip"
+                "https://download.microsoft.com/download/2/C/4/2C418B48-6CFD-4F41-8E55-1CA74A8DAF0D/Windows%2010%20Version%201809%20and%20Windows%20Server%202019%20Security%20Baseline.zip"
                 break
             }
             { $_ -ge 14393 } {
@@ -1945,7 +2003,6 @@ function win-ccdc {
     Get-Tools
 
     $tsharkPaths = @(
-        "C:\Tools\WiresharkPortable\App\Wireshark\tshark.exe",
         "C:\Program Files\Wireshark\tshark.exe",
         "${env:ProgramFiles(x86)}\Wireshark\tshark.exe"
     )
