@@ -959,13 +959,13 @@ function Generate-WDAC {
     $cssScanPath = "C:\opt\CSS"
     $css = $null
     if (Test-Path $cssScanPath) {
-        Write-Host "[+] CSS directory found at $cssScanPath — adding to scan" -ForegroundColor Cyan
+        Write-Host "[+] CSS directory found at $cssScanPath - adding to scan" -ForegroundColor Cyan
         $css = Start-Job -Name "css (C:\opt\CSS)" -ScriptBlock {
             param($cssDirPolicy, $cssScanPath)
             New-CIPolicy -FilePath $cssDirPolicy -Level FilePublisher -Fallback Hash,FileName -ScanPath $cssScanPath -UserPEs
         } -ArgumentList $cssDirPolicy, $cssScanPath
     } else {
-        Write-Host "[!] CSS directory not found at $cssScanPath — directory scan skipped" -ForegroundColor Yellow
+        Write-Host "[!] CSS directory not found at $cssScanPath - directory scan skipped" -ForegroundColor Yellow
         Write-Host "[!] The CSSClient.exe hash allow rule will still be added if the binary exists" -ForegroundColor Yellow
     }
 
@@ -1030,7 +1030,7 @@ function Generate-WDAC {
         Receive-Job $iis -ErrorAction SilentlyContinue | Out-Null
         if ((Get-Job -Id $iis.Id).State -eq 'Failed') {
             Write-Host "[!] IIS scan job failed: $($iis.ChildJobs[0].JobStateInfo.Reason)" -ForegroundColor Red
-            Write-Host "[!] IIS policy will be skipped — inetsrv apps may be blocked after deployment" -ForegroundColor Yellow
+            Write-Host "[!] IIS policy will be skipped - inetsrv apps may be blocked after deployment" -ForegroundColor Yellow
         }
         Remove-Job $iis
     }
@@ -1092,7 +1092,7 @@ function Generate-WDAC {
         Merge-CIPolicy -OutputFilePath $EnumPolicy -PolicyPaths $EnumPolicy -Rules $cssClientRule > $null
         Write-Host "[+] CSSClient.exe hash allow rule injected into enum policy" -ForegroundColor Green
     } else {
-        Write-Host "[!] WARNING: C:\CSSClient.exe not found — hash allow rule NOT added to policy!" -ForegroundColor Red
+        Write-Host "[!] WARNING: C:\CSSClient.exe not found - hash allow rule NOT added to policy!" -ForegroundColor Red
         Write-Host "[!] Place CSSClient.exe at $cssClientPath before deploying WDAC or the scoring" -ForegroundColor Red
         Write-Host "[!] engine WILL be blocked. Re-run Generate-WDAC once the binary is present." -ForegroundColor Red
     }
@@ -1134,7 +1134,7 @@ function Generate-WDAC {
         if (Test-Path $lolbin) {
             $chillBlocks += New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath $lolbin -Deny
         } else {
-            Write-Host "  [~] Skipping chill block for $(Split-Path $lolbin -Leaf) — not present on this image" -ForegroundColor DarkGray
+            Write-Host "  [~] Skipping chill block for $(Split-Path $lolbin -Leaf) - not present on this image" -ForegroundColor DarkGray
         }
     }
 
@@ -1142,7 +1142,7 @@ function Generate-WDAC {
         Merge-CIPolicy -OutputFilePath $ChillPolicy -PolicyPaths $ChillPolicy -Rules $chillBlocks > $null
         Write-Host "[+] Chill policy built ($($chillBlocks.Count) deny rule(s))" -ForegroundColor Green
     } else {
-        Write-Host "[!] No chill deny rules could be built — no target binaries found on this image" -ForegroundColor Yellow
+        Write-Host "[!] No chill deny rules could be built - no target binaries found on this image" -ForegroundColor Yellow
     }
     Set-WDACPolicyOptions -FilePath $ChillPolicy -Name "chill"
 
@@ -1160,7 +1160,7 @@ function Generate-WDAC {
         if (Test-Path $lolbin) {
             $aggroBlocks += New-CIPolicyRule -Level Hash -Fallback FileName -DriverFilePath $lolbin -Deny
         } else {
-            Write-Host "  [~] Skipping aggro block for $(Split-Path $lolbin -Leaf) — not present on this image" -ForegroundColor DarkGray
+            Write-Host "  [~] Skipping aggro block for $(Split-Path $lolbin -Leaf) - not present on this image" -ForegroundColor DarkGray
         }
     }
 
@@ -1168,7 +1168,7 @@ function Generate-WDAC {
         Merge-CIPolicy -OutputFilePath $AggroPolicy -PolicyPaths $AggroPolicy -Rules $aggroBlocks > $null
         Write-Host "[+] Aggro policy built ($($aggroBlocks.Count) deny rule(s))" -ForegroundColor Green
     } else {
-        Write-Host "[!] No aggro deny rules could be built — no target binaries found on this image" -ForegroundColor Yellow
+        Write-Host "[!] No aggro deny rules could be built - no target binaries found on this image" -ForegroundColor Yellow
     }
     Set-WDACPolicyOptions -FilePath $AggroPolicy -Name "aggro"
 
@@ -1453,7 +1453,7 @@ function Setup-SSH {
     $desktopPath = [Environment]::GetFolderPath('Desktop')
     Copy-Item $adminKeyFile (Join-Path $desktopPath "id_ed25519") -Force
     Copy-Item "$adminKeyFile.pub" (Join-Path $desktopPath "id_ed25519.pub") -Force
-    Write-Host "[+] Private key copied to Desktop — transfer this to your local machine!" -ForegroundColor Yellow
+    Write-Host "[+] Private key copied to Desktop - transfer this to your local machine!" -ForegroundColor Yellow
 
     $sshClientCap = Get-WindowsCapability -Online | Where-Object { $_.Name -like "OpenSSH.Client*" }
     if (-not $sshClientCap) {
@@ -1475,11 +1475,11 @@ function Setup-SSH {
     if ($sshScored -eq "yes") {
         $passwordAuth = "yes"
         $authMethods = "any"
-        Write-Host "[!] SSH is scored — password authentication enabled" -ForegroundColor Yellow
+        Write-Host "[!] SSH is scored - password authentication enabled" -ForegroundColor Yellow
     } else {
         $passwordAuth = "no"
         $authMethods = "publickey"
-        Write-Host "[+] SSH not scored — pubkey-only for Administrator" -ForegroundColor Green
+        Write-Host "[+] SSH not scored - pubkey-only for Administrator" -ForegroundColor Green
     }
 
     $configContent = @"
@@ -1510,8 +1510,19 @@ Match Group administrators
     Set-Content -Path $sshdConfig -Value $configContent -Force
     Write-Host "[+] Hardened sshd_config written" -ForegroundColor Green
 
-    Restart-Service sshd
-    Write-Host "[+] sshd restarted with new configuration" -ForegroundColor Green
+    try {
+        Restart-Service sshd -ErrorAction Stop
+        Write-Host "[+] sshd restarted with new configuration" -ForegroundColor Green
+    } catch {
+        Write-Host "[!] Restart-Service sshd failed: $_" -ForegroundColor Red
+        Write-Host "[!] Attempting Start-Service instead..." -ForegroundColor Yellow
+        Start-Service sshd -ErrorAction SilentlyContinue
+        if ((Get-Service sshd -ErrorAction SilentlyContinue).Status -eq 'Running') {
+            Write-Host "[+] sshd started" -ForegroundColor Green
+        } else {
+            Write-Host "[!] sshd is NOT running - check the config and start it manually" -ForegroundColor Red
+        }
+    }
 
     $sshFwRule = Get-NetFirewallRule -DisplayName "OpenSSH Server (sshd)" -ErrorAction SilentlyContinue
     if (-not $sshFwRule) {
@@ -1539,6 +1550,10 @@ function Email-For-Root-Login {
 
     $smtpPort = Read-Host -Prompt "Enter SMTP port (default 25)"
     if ([string]::IsNullOrWhiteSpace($smtpPort)) { $smtpPort = "25" }
+    if ($smtpPort -notmatch '^\d+$') {
+        Write-Host "[!] '$smtpPort' is not a valid port number - defaulting to 25" -ForegroundColor Yellow
+        $smtpPort = "25"
+    }
     [int]$smtpPort = [int]$smtpPort
 
     $mailUser = Read-Host -Prompt "Enter mail username (e.g. alert@domain.com)"
@@ -1584,9 +1599,9 @@ function Email-For-Root-Login {
 # The password was encrypted with an explicit AES key (not DPAPI) so that
 # this script can decrypt it when running as SYSTEM via a scheduled task.
 if (-not (Test-Path `$keyPath)) {
-    exit 1   # Key file missing — cannot decrypt password
+    exit 1   # Key file missing - cannot decrypt password
 }
-# Cast explicitly to [byte[]] — in PowerShell 5.1 Get-Content -Encoding Byte
+# Cast explicitly to [byte[]] - in PowerShell 5.1 Get-Content -Encoding Byte
 # returns Object[], and ConvertTo-SecureString -Key requires a true byte array.
 [byte[]]`$aesKey = Get-Content -Path `$keyPath -Encoding Byte
 `$secPass = `$encPassword | ConvertTo-SecureString -Key `$aesKey
@@ -1649,7 +1664,7 @@ if (`$isAdmin) {
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
     Write-Host "[+] Scheduled task '$taskName' registered - triggers on any user logon" -ForegroundColor Green
     Write-Host "[+] Emails will be sent to $mailTo when an admin logs in to $hostname" -ForegroundColor Green
-    Write-Host "[!] AES key stored at: $keyPath — do not delete this file or alerts will stop working" -ForegroundColor Yellow
+    Write-Host "[!] AES key stored at: $keyPath - do not delete this file or alerts will stop working" -ForegroundColor Yellow
     Write-Host "[!] Both $scriptPath and $keyPath are restricted to Administrators and SYSTEM" -ForegroundColor Yellow
 }
 
