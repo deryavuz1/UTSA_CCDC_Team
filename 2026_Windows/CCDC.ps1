@@ -202,32 +202,42 @@ function Get-Binary {
         @{ Name = "Certify";    Url = "https://github.com/r3motecontrol/Ghostpack-CompiledBinaries/raw/master/Certify.exe";                Out = "C:\Tools\Certify.exe" }
     )
 
-    $jobs = @()
+    $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, [Math]::Min($downloads.Count, 4))
+    $runspacePool.Open()
+
+    $runspaces = @()
     foreach ($dl in $downloads) {
         Write-Host "  [>] Starting download: $($dl.Name)"
-        $jobs += Start-Job -Name $dl.Name -ScriptBlock {
+        $ps = [PowerShell]::Create().AddScript({
             param($url, $out)
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
-            Invoke-WebRequest $url -OutFile $out -UseBasicParsing -Headers $headers
-        } -ArgumentList $dl.Url, $dl.Out
+            $wc = New-Object System.Net.WebClient
+            $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            $wc.DownloadFile($url, $out)
+        }).AddArgument($dl.Url).AddArgument($dl.Out)
+        $ps.RunspacePool = $runspacePool
+        $runspaces += @{ Name = $dl.Name; PowerShell = $ps; Handle = $ps.BeginInvoke() }
     }
 
-    Wait-Job $jobs | Out-Null
-    foreach ($j in $jobs) {
-        if ($j.State -eq 'Failed') {
-            Write-Host "  [!] Download failed [$($j.Name)]: $($j.ChildJobs[0].JobStateInfo.Reason)" -ForegroundColor Red
+    foreach ($rs in $runspaces) {
+        try { $rs.PowerShell.EndInvoke($rs.Handle) } catch {}
+        if ($rs.PowerShell.HadErrors) {
+            $errMsg = $rs.PowerShell.Streams.Error | Select-Object -First 1
+            Write-Host "  [!] Download failed [$($rs.Name)]: $errMsg" -ForegroundColor Red
         }
-        Remove-Job $j
+        $rs.PowerShell.Dispose()
     }
+    $runspacePool.Close()
+    $runspacePool.Dispose()
 
-    # Verify each download actually produced a file (jobs can "succeed" but write nothing
-    # if the URL redirected to an error page or the target directory was missing)
+    # Verify each download produced a file - retry only for missing ones
     foreach ($dl in $downloads) {
         if (-not (Test-Path $dl.Out)) {
-            Write-Host "  [!] $($dl.Name) file not found at $($dl.Out) after download - retrying synchronously..." -ForegroundColor Yellow
+            Write-Host "  [!] $($dl.Name) file not found at $($dl.Out) - retrying..." -ForegroundColor Yellow
             try {
-                Invoke-WebRequest $dl.Url -OutFile $dl.Out -UseBasicParsing -Headers $ghHeaders -ErrorAction Stop
+                $wc = New-Object System.Net.WebClient
+                $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                $wc.DownloadFile($dl.Url, $dl.Out)
                 Write-Host "  [+] $($dl.Name) downloaded on retry" -ForegroundColor Green
             } catch {
                 Write-Host "  [!] $($dl.Name) retry also failed: $_" -ForegroundColor Red
@@ -450,6 +460,65 @@ function Get-SystemInformer {
     }
 }
 
+function Get-Wireshark {
+    if (-not (Test-Path "C:\Tools")) {
+        New-Item -Path "C:\Tools" -ItemType Directory -Force | Out-Null
+    }
+
+    $wiresharkExe = "C:\Tools\WiresharkInstaller.exe"
+
+    Write-Host "[+] Downloading Wireshark..." -ForegroundColor Cyan
+    try {
+        $wc = New-Object System.Net.WebClient
+        $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        $wc.DownloadFile("https://www.wireshark.org/download/win64/Wireshark-latest-x64.exe", $wiresharkExe)
+        Write-Host "[+] Downloaded Wireshark installer" -ForegroundColor Green
+    } catch {
+        Write-Host "[!] Failed to download Wireshark: $_" -ForegroundColor Red
+        Write-Host "[!] Download manually from https://www.wireshark.org/download.html" -ForegroundColor Yellow
+        return
+    }
+
+    if (-not (Test-Path $wiresharkExe) -or (Get-Item $wiresharkExe).Length -lt 100000) {
+        Write-Host "[!] Wireshark installer missing or too small - download may have failed" -ForegroundColor Red
+        return
+    }
+
+    Write-Host "[+] Installing Wireshark silently..." -ForegroundColor Cyan
+    $proc = Start-Process -FilePath $wiresharkExe -ArgumentList "/S" -Wait -PassThru -NoNewWindow -ErrorAction SilentlyContinue
+    if ($proc.ExitCode -eq 0 -and (Test-Path "C:\Program Files\Wireshark\tshark.exe")) {
+        Write-Host "[+] Wireshark installed - tshark at C:\Program Files\Wireshark\tshark.exe" -ForegroundColor Green
+    } else {
+        Write-Host "[!] Wireshark install may have failed (exit code $($proc.ExitCode))" -ForegroundColor Yellow
+    }
+    Remove-Item $wiresharkExe -Force -ErrorAction SilentlyContinue
+
+    $runCapture = Read-Host -Prompt "Start a 90-second background packet capture now? (yes/no)"
+    if ($runCapture -eq "yes") {
+        $desktopPath = [Environment]::GetFolderPath('Desktop')
+        $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+        $pcapFile = Join-Path $desktopPath "capture_$timestamp.pcapng"
+
+        $tsharkPaths = @(
+            "C:\Program Files\Wireshark\tshark.exe",
+            "${env:ProgramFiles(x86)}\Wireshark\tshark.exe"
+        )
+        $tshark = $tsharkPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+        if ($tshark) {
+            Write-Host "[+] Starting 90-second tshark capture -> $pcapFile" -ForegroundColor Cyan
+            $tsharkJob = Start-Job -ScriptBlock {
+                param($tsharkPath, $outFile)
+                & $tsharkPath -a duration:90 -w $outFile 2>&1
+            } -ArgumentList $tshark, $pcapFile
+            Write-Host "[+] tshark capture running as background job (ID: $($tsharkJob.Id))" -ForegroundColor Green
+            Write-Host "[+] Run 'Receive-Job $($tsharkJob.Id)' to check status, or 'Wait-Job $($tsharkJob.Id)' to wait" -ForegroundColor Cyan
+        } else {
+            Write-Host "[!] tshark not found after install - capture skipped" -ForegroundColor Red
+        }
+    }
+}
+
 
 function Get-Tools {
     New-Item -Path C:\ -Name "Tools" -ItemType Directory -Force > $null
@@ -481,7 +550,6 @@ function Get-Tools {
         @{ Name = "Firefox";        Url = "https://download.mozilla.org/?product=firefox-stub&os=win&lang=en-US";                                              Out = "C:\Tools\FirefoxInstaller.exe" }
         @{ Name = "LDAP Firewall";  Url = "https://github.com/zeronetworks/ldapfw/releases/download/v1.0.0/ldapfw_v1.0.0-x64.zip";                            Out = "C:\Tools\ldapfw.zip" }
         @{ Name = "ALTools";        Url = "https://download.microsoft.com/download/1/f/0/1f0e9569-3350-4329-b443-822976f29284/ALTools.exe";                    Out = "C:\Tools\ALTools.exe" }
-        @{ Name = "Wireshark";      Url = "https://www.wireshark.org/download/win64/Wireshark-latest-x64.exe";                                                  Out = "C:\Tools\WiresharkInstaller.exe" }
         @{ Name = "RefreshPolicy";     Url = "https://aka.ms/refreshpolicy";                                                                                     Out = "C:\Tools\RefreshPolicy.exe" }
     )
 
@@ -493,38 +561,58 @@ function Get-Tools {
         $downloads += @{ Name = "Sysmon Config"; Url = "https://raw.githubusercontent.com/SouthwestCCDC/2026-Regionals-Shared/refs/heads/main/The%20University%20of%20Texas%20at%20San%20Antonio/2026_Windows/sysmon-config.xml"; Out = "C:\Tools\sysmon-config.xml" }
     }
 
-    $jobs = @()
+    # Use runspaces (thread-based) instead of Start-Job (process-based) for parallel
+    # downloads.  Start-Job spawns a full powershell.exe per download which is slow on
+    # constrained CCDC VMs and can be blocked by constrained language mode / WDAC.
+    # Runspaces share the parent process and start in milliseconds.
+    # We use [System.Net.WebClient] instead of Invoke-WebRequest because WebClient is
+    # lower-level .NET and follows complex redirect chains (Mozilla CDN, Microsoft
+    # download center, Wireshark mirrors) natively without needing the PowerShell
+    # session state that Invoke-WebRequest relies on for cookie/redirect context.
+    $runspacePool = [RunspaceFactory]::CreateRunspacePool(1, [Math]::Min($downloads.Count, 8))
+    $runspacePool.Open()
+
+    $runspaces = @()
     foreach ($dl in $downloads) {
         Write-Host "  [>] Starting download: $($dl.Name)"
-        $jobs += Start-Job -Name $dl.Name -ScriptBlock {
+        $ps = [PowerShell]::Create().AddScript({
             param($url, $out)
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            # Use a browser User-Agent - GitHub throttles/blocks the default
-            # PowerShell UA, causing silent 0-byte downloads in background jobs
-            $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
-            Invoke-WebRequest $url -OutFile $out -UseBasicParsing -Headers $headers
-        } -ArgumentList $dl.Url, $dl.Out
+            $wc = New-Object System.Net.WebClient
+            $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            $wc.DownloadFile($url, $out)
+        }).AddArgument($dl.Url).AddArgument($dl.Out)
+        $ps.RunspacePool = $runspacePool
+        $runspaces += @{ Name = $dl.Name; PowerShell = $ps; Handle = $ps.BeginInvoke() }
     }
 
     Write-Host "[+] Waiting for all downloads to complete..." -ForegroundColor Cyan
-    Wait-Job $jobs | Out-Null
     $failCount = 0
-    foreach ($j in $jobs) {
-        if ($j.State -eq 'Failed') {
-            Write-Host "  [!] Download failed [$($j.Name)]: $($j.ChildJobs[0].JobStateInfo.Reason)" -ForegroundColor Red
+    foreach ($rs in $runspaces) {
+        try {
+            $rs.PowerShell.EndInvoke($rs.Handle)
+        } catch {
+            # ignore - we check for errors via HadErrors below
+        }
+        if ($rs.PowerShell.HadErrors) {
+            $errMsg = $rs.PowerShell.Streams.Error | Select-Object -First 1
+            Write-Host "  [!] Download failed [$($rs.Name)]: $errMsg" -ForegroundColor Red
             $failCount++
         }
-        Remove-Job $j
+        $rs.PowerShell.Dispose()
     }
+    $runspacePool.Close()
+    $runspacePool.Dispose()
     Write-Host "[+] Downloads finished ($failCount failure(s))" -ForegroundColor Green
 
-    # Verify each download actually produced a file and retry synchronously if missing
-    $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" }
+    # Verify each download produced a file - retry synchronously only for missing ones
     foreach ($dl in $downloads) {
         if (-not (Test-Path $dl.Out)) {
-            Write-Host "  [!] $($dl.Name) not found at $($dl.Out) - retrying synchronously..." -ForegroundColor Yellow
+            Write-Host "  [!] $($dl.Name) not found at $($dl.Out) - retrying..." -ForegroundColor Yellow
             try {
-                Invoke-WebRequest $dl.Url -OutFile $dl.Out -UseBasicParsing -Headers $headers -ErrorAction Stop
+                $wc = New-Object System.Net.WebClient
+                $wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                $wc.DownloadFile($dl.Url, $dl.Out)
                 Write-Host "  [+] $($dl.Name) downloaded on retry" -ForegroundColor Green
             } catch {
                 Write-Host "  [!] $($dl.Name) retry also failed: $_" -ForegroundColor Red
@@ -572,20 +660,6 @@ function Get-Tools {
         }
     } else {
         Write-Host "[!] ldapfw directory not found - skipping LDAP Firewall config download" -ForegroundColor Red
-    }
-
-    $wiresharkExe = "C:\Tools\WiresharkInstaller.exe"
-    if (Test-Path $wiresharkExe) {
-        Write-Host "[+] Installing Wireshark silently..." -ForegroundColor Cyan
-        $proc = Start-Process -FilePath $wiresharkExe -ArgumentList "/S" -Wait -PassThru -NoNewWindow -ErrorAction SilentlyContinue
-        if ($proc.ExitCode -eq 0 -and (Test-Path "C:\Program Files\Wireshark\tshark.exe")) {
-            Write-Host "[+] tshark installed at C:\Program Files\Wireshark\tshark.exe" -ForegroundColor Green
-        } else {
-            Write-Host "[!] Wireshark install may have failed (exit code $($proc.ExitCode)) - tshark not found" -ForegroundColor Yellow
-        }
-        Remove-Item $wiresharkExe -Force -ErrorAction SilentlyContinue
-    } else {
-        Write-Host "[!] Wireshark installer not found - skipping tshark install" -ForegroundColor Yellow
     }
 
     Write-Host "[+] Done!" -ForegroundColor Green
@@ -2093,26 +2167,6 @@ function win-ccdc {
     Write-Host "============================================" -ForegroundColor Magenta
     Get-Tools
 
-    $tsharkPaths = @(
-        "C:\Program Files\Wireshark\tshark.exe",
-        "${env:ProgramFiles(x86)}\Wireshark\tshark.exe"
-    )
-    $tshark = $tsharkPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-    $pcapFile = Join-Path $desktopPath "capture_$timestamp.pcapng"
-
-    if ($tshark) {
-        Write-Host "[+] Starting 90-second tshark capture in background -> $pcapFile" -ForegroundColor Cyan
-        $tsharkJob = Start-Job -ScriptBlock {
-            param($tsharkPath, $outFile)
-            & $tsharkPath -a duration:90 -w $outFile 2>&1
-        } -ArgumentList $tshark, $pcapFile
-        Write-Host "[+] tshark capture running as background job (ID: $($tsharkJob.Id))" -ForegroundColor Green
-    } else {
-        Write-Host "[!] tshark not found - skipping background packet capture" -ForegroundColor Yellow
-        Write-Host "[!] Install Wireshark or re-run Get-Tools to enable" -ForegroundColor Yellow
-        $tsharkJob = $null
-    }
-
     $installSI = Read-Host -Prompt "Do you want to download System Informer? (yes/no)"
     if ($installSI -eq "yes") {
         Get-SystemInformer
@@ -2204,20 +2258,6 @@ function win-ccdc {
     Write-Host "============================================" -ForegroundColor Magenta
     Phase2
 
-    if ($tsharkJob) {
-        if ($tsharkJob.State -eq 'Running') {
-            Write-Host "`n[+] Waiting for tshark capture to finish..." -ForegroundColor Cyan
-            Wait-Job $tsharkJob | Out-Null
-        }
-        if ($tsharkJob.State -eq 'Completed') {
-            Write-Host "[+] tshark capture saved to: $pcapFile" -ForegroundColor Green
-        } else {
-            Write-Host "[!] tshark capture may have encountered an error (State: $($tsharkJob.State))" -ForegroundColor Yellow
-            Receive-Job $tsharkJob | Write-Host
-        }
-        Remove-Job $tsharkJob -Force -ErrorAction SilentlyContinue
-    }
-
     Write-Host "`n============================================" -ForegroundColor Green
     Write-Host "  win-ccdc complete!" -ForegroundColor Green
     Write-Host "============================================" -ForegroundColor Green
@@ -2229,7 +2269,4 @@ function win-ccdc {
         if ($certifyOutput) { Write-Host "  - Certify ADCS: $certifyOutput" -ForegroundColor Cyan }
     }
     Write-Host "  - WDAC Policies: enum.xml, chill.xml, aggro.xml" -ForegroundColor Cyan
-    if ($tsharkJob) {
-        Write-Host "  - Packet Capture: $pcapFile" -ForegroundColor Cyan
-    }
 }
